@@ -99,7 +99,6 @@ function registerStaffTools(server, client) {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'standing,company_id,date_created,date_due,date_paid,total,tax,subtotal,against_type,against_id',
       };
       if (company_id) params['company_id'] = company_id;
       if (status && status !== 'all') params['standing'] = status;
@@ -111,19 +110,7 @@ function registerStaffTools(server, client) {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            invoices: invoices.map(i => ({
-              id: i.id,
-              status: i.standing,
-              company_id: i.company_id,
-              date_created: i.date_created,
-              date_due: i.date_due,
-              date_paid: i.date_paid,
-              total: i.total,
-              subtotal: i.subtotal,
-              tax: i.tax,
-              against_type: i.against_type,
-              against_id: i.against_id,
-            })),
+            invoices: invoices.map(i => ({ ...i })),
             total: meta.more_info?.total_count || invoices.length,
           }, null, 2),
         }],

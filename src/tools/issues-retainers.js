@@ -84,7 +84,6 @@ function registerRetainerTools(server, client) {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_expires,budget,rate_charged,type_id',
       };
       if (company_id) params['company_id'] = company_id;
       if (status && status !== 'all') params['standing'] = status;
@@ -96,16 +95,7 @@ function registerRetainerTools(server, client) {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            retainers: retainers.map(r => ({
-              id: r.id,
-              title: r.title,
-              status: r.standing,
-              company_id: r.company_id,
-              manager_id: r.manager_id,
-              date_commenced: r.date_commenced,
-              date_expires: r.date_expires,
-              budget: r.budget,
-            })),
+            retainers: retainers.map(r => ({ ...r })),
             total: meta.more_info?.total_count || retainers.length,
           }, null, 2),
         }],
@@ -120,9 +110,7 @@ function registerRetainerTools(server, client) {
       retainer_id: z.string().describe('The Accelo contract/retainer ID'),
     },
     async ({ retainer_id }) => {
-      const { data } = await client.get(`/contracts/${retainer_id}`, {
-        '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_expires,budget,rate_charged,auto_renew,type_id,staff',
-      });
+      const { data } = await client.get(`/contracts/${retainer_id}`, {});
 
       return {
         content: [{
