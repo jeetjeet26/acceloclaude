@@ -97,6 +97,79 @@ function registerProjectTools(server, client) {
       };
     }
   );
+  // Create a task (POST only — no edit, no delete)
+  server.tool(
+    'create_task',
+    'Create a new task in Accelo. Link it to a job, issue, or other object via against_type + against_id.',
+    {
+      title: z.string().describe('Title for the new task'),
+      against_type: z.string().optional().describe('Type of parent object (e.g. "job", "issue", "milestone")'),
+      against_id: z.string().optional().describe('ID of the parent object'),
+      description: z.string().optional().describe('Description of the task'),
+      status_id: z.string().optional().describe('ID of the initial task status'),
+      manager_id: z.string().optional().describe('Staff ID of the task manager'),
+      assignee_id: z.string().optional().describe('Staff ID to assign the task to'),
+      affiliation_id: z.string().optional().describe('Affiliation ID to link to the task'),
+      priority_id: z.string().optional().describe('Priority ID for the task'),
+      date_started: z.string().optional().describe('Start date as unix timestamp'),
+      date_due: z.string().optional().describe('Due date as unix timestamp'),
+    },
+    async (params) => {
+      const body = {};
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined) body[key] = value;
+      }
+
+      const { data } = await client.post('/tasks', body, {
+        '_fields': 'title,standing,date_created,date_started,date_due,date_completed,assignee,against_type,against_id,manager_id,description',
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ created_task: data }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // Create a new job/project (POST only — no edit, no delete)
+  server.tool(
+    'create_job',
+    'Create a new job (project) in Accelo. Returns the created job. Only type_id is required; provide against_type + against_id to link to a company or other object.',
+    {
+      type_id: z.string().describe('Required — the ID of a valid Accelo job type'),
+      title: z.string().optional().describe('Title for the new job'),
+      against_type: z.string().optional().describe('The type of object this job is against (e.g. "company")'),
+      against_id: z.string().optional().describe('The ID of the object this job is against'),
+      manager_id: z.string().optional().describe('Staff ID of the job manager'),
+      status_id: z.string().optional().describe('ID of the initial job status'),
+      affiliation_id: z.string().optional().describe('Affiliation ID to link to the job'),
+      contract_id: z.string().optional().describe('Contract ID to link to the job'),
+      rate_id: z.string().optional().describe('Rate ID for the job'),
+      rate_charged: z.string().optional().describe('Rate charged for billable work'),
+      date_due: z.string().optional().describe('Due date as unix timestamp'),
+      date_started: z.string().optional().describe('Start date as unix timestamp'),
+      is_billable: z.enum(['yes', 'no']).optional().describe('Whether the job is billable'),
+    },
+    async (params) => {
+      const body = {};
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined) body[key] = value;
+      }
+
+      const { data } = await client.post('/jobs', body, {
+        '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,job_type',
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ created_job: data }, null, 2),
+        }],
+      };
+    }
+  );
 }
 
 module.exports = { registerProjectTools };

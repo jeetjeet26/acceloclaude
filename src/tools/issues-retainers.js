@@ -49,6 +49,44 @@ function registerIssueTools(server, client) {
     }
   );
 
+  // Create a new issue/service ticket (POST only — no edit, no delete)
+  server.tool(
+    'create_issue',
+    'Create a new service ticket (issue) in Accelo. Use against_type + against_id to link it to a company or other object.',
+    {
+      title: z.string().describe('Title for the new ticket'),
+      type_id: z.string().optional().describe('ID of a valid issue type (see list_issue_types)'),
+      against_type: z.string().optional().describe('Type of object this issue is against (e.g. "company")'),
+      against_id: z.string().optional().describe('ID of the object this issue is against'),
+      description: z.string().optional().describe('Description / body of the issue'),
+      standing: z.enum(['submitted', 'open', 'resolved', 'closed', 'inactive']).optional().describe('Initial standing for the issue'),
+      status_id: z.string().optional().describe('ID of the initial issue status (more precise than standing)'),
+      class_id: z.string().optional().describe('ID of the issue class'),
+      affiliation_id: z.string().optional().describe('Affiliation ID to link to the issue'),
+      assignee: z.string().optional().describe('Staff ID to assign the issue to'),
+      priority_id: z.string().optional().describe('Priority ID for the issue'),
+      date_started: z.string().optional().describe('Start date as unix timestamp'),
+      date_due: z.string().optional().describe('Due date as unix timestamp'),
+    },
+    async (params) => {
+      const body = {};
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined) body[key] = value;
+      }
+
+      const { data } = await client.post('/issues', body, {
+        '_fields': 'title,standing,company_id,contact_id,assignee,date_created,date_due,type_id,priority,class_id,description',
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ created_issue: data }, null, 2),
+        }],
+      };
+    }
+  );
+
   server.tool(
     'get_issue',
     'Get full details for a specific Accelo ticket/issue by ID.',

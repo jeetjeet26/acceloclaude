@@ -112,6 +112,38 @@ function registerCompanyTools(server, client) {
       };
     }
   );
+  // Create a new company (POST only — no edit, no delete)
+  server.tool(
+    'create_company',
+    'Create a new company in Accelo. Returns the created company.',
+    {
+      name: z.string().describe('Required — the company name'),
+      website: z.string().optional().describe('Company website URL'),
+      phone: z.string().optional().describe('Company phone number'),
+      fax: z.string().optional().describe('Company fax number'),
+      comments: z.string().optional().describe('Notes or comments about the company'),
+      parent_id: z.string().optional().describe('ID of a parent company'),
+      status_id: z.string().optional().describe('ID of the company status'),
+      standing: z.enum(['active', 'inactive']).optional().describe('Company standing (overridden if status_id is also sent)'),
+    },
+    async (params) => {
+      const body = {};
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined) body[key] = value;
+      }
+
+      const { data } = await client.post('/companies', body, {
+        '_fields': 'name,phone,website,standing,date_created,comments',
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ created_company: data }, null, 2),
+        }],
+      };
+    }
+  );
 }
 
 module.exports = { registerCompanyTools };

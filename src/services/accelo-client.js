@@ -85,6 +85,46 @@ class AcceloClient {
     }
     return { data: json, meta: {} };
   }
+
+  async post(path, body = {}, params = {}) {
+    const token = await this.getToken();
+    const url = new URL(`${this.baseUrl}${path}`);
+
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') {
+        url.searchParams.set(k, String(v));
+      }
+    }
+
+    const formBody = new URLSearchParams();
+    for (const [k, v] of Object.entries(body)) {
+      if (v !== undefined && v !== null && v !== '') {
+        formBody.set(k, String(v));
+      }
+    }
+
+    const resp = await fetch(url.toString(), {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+      },
+      body: formBody.toString(),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Accelo API error ${resp.status} on POST ${path}: ${text}`);
+    }
+
+    const json = await resp.json();
+
+    if (json.response !== undefined) {
+      return { data: json.response, meta: json.meta || {} };
+    }
+    return { data: json, meta: {} };
+  }
 }
 
 module.exports = { AcceloClient };
