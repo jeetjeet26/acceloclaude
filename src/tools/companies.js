@@ -144,6 +144,29 @@ function registerCompanyTools(server, client) {
       };
     }
   );
+  // Add a manager to a company (POST only)
+  server.tool(
+    'add_company_manager',
+    'Assign a staff member as a manager of an Accelo company.',
+    {
+      company_id: z.string().describe('The Accelo company ID'),
+      manager_id: z.string().describe('The staff ID of the person to assign as manager'),
+      nature: z.enum(['professional', 'confidential', 'private']).optional().default('professional').describe('Nature of the manager relationship'),
+    },
+    async ({ company_id, manager_id, nature }) => {
+      const { data } = await client.post(`/companies/${company_id}/managers/add`, {
+        manager_id,
+        nature,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ company_id, managers: data }, null, 2),
+        }],
+      };
+    }
+  );
 }
 
 module.exports = { registerCompanyTools };

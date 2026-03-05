@@ -147,7 +147,7 @@ app.listen(PORT, () => {
     console.log('   Auth: No token set (set MCP_AUTH_TOKEN to secure)');
   }
   console.log('\n   Available tools:');
-  console.log('   - list_companies, get_company, list_contacts, create_company');
+  console.log('   - list_companies, get_company, list_contacts, create_company, add_company_manager');
   console.log('   - list_projects, get_project, list_project_tasks, create_job, create_task');
   console.log('   - list_issues, get_issue, create_issue');
   console.log('   - list_retainers, get_retainer');
