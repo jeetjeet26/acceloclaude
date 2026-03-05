@@ -61,7 +61,9 @@ function registerProjectTools(server, client) {
       project_id: z.string().describe('The Accelo project ID'),
     },
     async ({ project_id }) => {
-      const { data } = await client.get(`/jobs/${project_id}`, {});
+      const { data } = await client.get(`/jobs/${project_id}`, {
+        '_fields': 'title,standing,company_id,manager_id,description,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value',
+      });
 
       return {
         content: [{
