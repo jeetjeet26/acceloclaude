@@ -24,7 +24,7 @@ function registerProjectTools(server, client) {
       if (company_id) params['company_id'] = company_id;
       if (status && status !== 'all') params['standing'] = status;
 
-      const { data, meta } = await client.get('/projects', params);
+      const { data, meta } = await client.get('/jobs', params);
       const projects = Array.isArray(data) ? data : (data ? [data] : []);
 
       return {
@@ -57,7 +57,7 @@ function registerProjectTools(server, client) {
       project_id: z.string().describe('The Accelo project ID'),
     },
     async ({ project_id }) => {
-      const { data } = await client.get(`/projects/${project_id}`, {
+      const { data } = await client.get(`/jobs/${project_id}`, {
         '_fields': 'title,status,standing,company_id,manager_id,description,date_created,date_commenced,date_due,date_completed,budget,rate_charged,staff',
       });
 
@@ -79,7 +79,7 @@ function registerProjectTools(server, client) {
       limit: z.number().int().min(1).max(100).optional().default(50),
     },
     async ({ project_id, limit }) => {
-      const { data } = await client.get(`/projects/${project_id}/tasks`, {
+      const { data } = await client.get(`/jobs/${project_id}/tasks`, {
         '_limit': limit,
         '_fields': 'title,standing,date_created,date_started,date_due,date_completed,assignee,budget,logged_budget',
       });

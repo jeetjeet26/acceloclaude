@@ -41,8 +41,9 @@ const sessions = new Map();
 const app = express();
 app.use(express.json());
 
+const BASE_URL = process.env.BASE_URL || `https://p11-accelo-mcp-9c30e120505f.herokuapp.com`;
+
 // Optional: protect the MCP endpoint with a bearer token
-// This is what you enter as the auth token when adding the connector in Claude
 function authMiddleware(req, res, next) {
   if (!MCP_AUTH_TOKEN) return next();
 
@@ -50,12 +51,32 @@ function authMiddleware(req, res, next) {
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
 
   if (token !== MCP_AUTH_TOKEN) {
+    res.set(
+      'WWW-Authenticate',
+      `Bearer realm="${BASE_URL}", resource="${BASE_URL}/mcp"`
+    );
     return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or missing bearer token' });
   }
   next();
 }
 
-// Health check (Claude Desktop pings this to test connectivity)
+// OAuth 2.0 Protected Resource Metadata (RFC 9728 / MCP auth spec)
+const oauthResourceMetadata = {
+  resource: `${BASE_URL}/mcp`,
+  authorization_servers: [],
+  bearer_methods_supported: ['header'],
+  resource_documentation: `${BASE_URL}/health`,
+};
+
+app.get('/.well-known/oauth-protected-resource', (req, res) => {
+  res.json(oauthResourceMetadata);
+});
+
+app.get('/.well-known/oauth-protected-resource/mcp', (req, res) => {
+  res.json(oauthResourceMetadata);
+});
+
+// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'accelo-mcp', deployment: process.env.ACCELO_DEPLOYMENT });
 });
