@@ -18,7 +18,7 @@ function registerProjectTools(server, client) {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'title,status,company_id,manager_id,date_created,date_commenced,date_due,date_completed,budget,rate_charged',
+        '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,staff',
       };
       if (search) params['_search'] = search;
       if (company_id) params['company_id'] = company_id;
@@ -34,13 +34,17 @@ function registerProjectTools(server, client) {
             projects: projects.map(p => ({
               id: p.id,
               title: p.title,
-              status: p.standing || p.status,
+              status: p.standing,
               company_id: p.company_id,
               manager_id: p.manager_id,
               date_created: p.date_created,
+              date_commenced: p.date_commenced,
               date_due: p.date_due,
               date_completed: p.date_completed,
               budget: p.budget,
+              rate_charged: p.rate_charged,
+              billable: p.billable,
+              value: p.value,
             })),
             total: meta.more_info?.total_count || projects.length,
           }, null, 2),
@@ -58,7 +62,7 @@ function registerProjectTools(server, client) {
     },
     async ({ project_id }) => {
       const { data } = await client.get(`/jobs/${project_id}`, {
-        '_fields': 'title,status,standing,company_id,manager_id,description,date_created,date_commenced,date_due,date_completed,budget,rate_charged,staff',
+        '_fields': 'title,standing,company_id,manager_id,description,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,staff',
       });
 
       return {
