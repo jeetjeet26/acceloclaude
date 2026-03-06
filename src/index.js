@@ -14,6 +14,8 @@ const { registerRequestTools } = require('./tools/requests.js');
 const { registerActivityTools } = require('./tools/activities.js');
 const { registerSalesTools, registerStaffTools } = require('./tools/sales-staff.js');
 const { registerIssueTools, registerRetainerTools } = require('./tools/issues-retainers.js');
+const { registerQuoteTools, registerPurchaseTools } = require('./tools/quotes-purchases.js');
+const { registerContributorTools, registerProgressionTools, registerSegmentationTools, registerSignoffTools, registerResourceTools } = require('./tools/workflows.js');
 
 // ── Config validation ─────────────────────────────────────────────────────────
 const REQUIRED_VARS = ['ACCELO_DEPLOYMENT', 'ACCELO_CLIENT_ID', 'ACCELO_CLIENT_SECRET'];
@@ -131,6 +133,13 @@ function buildMcpServer() {
   registerStaffTools(server, acceloClient);
   registerIssueTools(server, acceloClient);
   registerRetainerTools(server, acceloClient);
+  registerQuoteTools(server, acceloClient);
+  registerPurchaseTools(server, acceloClient);
+  registerContributorTools(server, acceloClient);
+  registerProgressionTools(server, acceloClient);
+  registerSegmentationTools(server, acceloClient);
+  registerSignoffTools(server, acceloClient);
+  registerResourceTools(server, acceloClient);
 
   return server;
 }
@@ -153,5 +162,8 @@ app.listen(PORT, () => {
   console.log('   - list_retainers, get_retainer');
   console.log('   - list_requests, get_request');
   console.log('   - list_activities, list_time_entries, get_time_allocations');
-  console.log('   - list_prospects, list_staff, list_invoices\n');
+  console.log('   - list_prospects, list_staff, list_invoices');
+  console.log('   - list_quotes, get_quote, list_purchases');
+  console.log('   - list_contributors, list_progression_history, list_progressions');
+  console.log('   - list_segmentations, list_signoffs, list_resources\n');
 });
