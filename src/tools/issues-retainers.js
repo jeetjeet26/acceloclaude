@@ -1,6 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
+const { AcceloClient } = require('../services/accelo-client');
 
 function registerIssueTools(server, client) {
   server.tool(
@@ -21,9 +22,13 @@ function registerIssueTools(server, client) {
         '_fields': 'title,standing,company_id,contact_id,assignee,date_created,date_modified,date_due,type_id,priority',
       };
       if (search) params['_search'] = search;
-      if (company_id) params['company_id'] = company_id;
-      if (status && status !== 'all') params['standing'] = status;
-      if (assignee_id) params['assignee_id'] = assignee_id;
+
+      const filters = [];
+      if (company_id) filters.push(`against(company(${company_id}))`);
+      if (status && status !== 'all') filters.push(`standing(${status})`);
+      if (assignee_id) filters.push(`assignee(${assignee_id})`);
+      const filterStr = AcceloClient.buildFilters(filters);
+      if (filterStr) params['_filters'] = filterStr;
 
       const { data, meta } = await client.get('/issues', params);
       const issues = Array.isArray(data) ? data : (data ? [data] : []);
@@ -124,8 +129,12 @@ function registerRetainerTools(server, client) {
         '_page': page,
         '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_expires,budget,rate_charged,value,period_template_id,auto_renew,type_id',
       };
-      if (company_id) params['company_id'] = company_id;
-      if (status && status !== 'all') params['standing'] = status;
+
+      const filters = [];
+      if (company_id) filters.push(`against(company(${company_id}))`);
+      if (status && status !== 'all') filters.push(`standing(${status})`);
+      const filterStr = AcceloClient.buildFilters(filters);
+      if (filterStr) params['_filters'] = filterStr;
 
       const { data, meta } = await client.get('/contracts', params);
       const retainers = Array.isArray(data) ? data : (data ? [data] : []);

@@ -1,6 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
+const { AcceloClient } = require('../services/accelo-client');
 
 /**
  * Company & Contact tools — read-only
@@ -25,7 +26,11 @@ function registerCompanyTools(server, client) {
         '_fields': fields || 'name,phone,website,standing',
       };
       if (search) params['_search'] = search;
-      if (status && status !== 'all') params['standing'] = status;
+
+      const filters = [];
+      if (status && status !== 'all') filters.push(`standing(${status})`);
+      const filterStr = AcceloClient.buildFilters(filters);
+      if (filterStr) params['_filters'] = filterStr;
 
       const { data, meta } = await client.get('/companies', params);
       const companies = Array.isArray(data) ? data : [data];
@@ -89,9 +94,9 @@ function registerCompanyTools(server, client) {
         '_fields': 'firstname,surname,email,phone,company_id,standing',
       };
       if (search) params['_search'] = search;
-      if (company_id) params['company_id'] = company_id;
 
-      const { data, meta } = await client.get('/contacts', params);
+      const endpoint = company_id ? `/companies/${company_id}/contacts` : '/contacts';
+      const { data, meta } = await client.get(endpoint, params);
       const contacts = Array.isArray(data) ? data : [data];
 
       return {

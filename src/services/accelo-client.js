@@ -7,7 +7,7 @@
  */
 
 class AcceloClient {
-  constructor({ deployment, clientId, clientSecret }) {
+  constructor({ deployment, clientId, clientSecret, timeoutMs = 30_000 }) {
     if (!deployment || !clientId || !clientSecret) {
       throw new Error('AcceloClient requires deployment, clientId, and clientSecret');
     }
@@ -18,6 +18,19 @@ class AcceloClient {
     this.tokenUrl = `https://${deployment}.api.accelo.com/oauth2/v0/token`;
     this.accessToken = null;
     this.tokenExpiresAt = null;
+    this.timeoutMs = timeoutMs;
+  }
+
+  /**
+   * Build an Accelo _filters string from a map of filter names to values.
+   * Handles basic filters like standing(active), object filters like against(company(123)),
+   * and combines them with commas.
+   * @param {Array<string>} filters - Pre-formatted filter expressions
+   * @returns {string} Combined _filters value, or empty string if none
+   */
+  static buildFilters(filters) {
+    const parts = filters.filter(Boolean);
+    return parts.length ? parts.join(',') : '';
   }
 
   async getToken() {
@@ -35,6 +48,7 @@ class AcceloClient {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: 'grant_type=client_credentials',
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!resp.ok) {
@@ -70,6 +84,7 @@ class AcceloClient {
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/json',
       },
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!resp.ok) {
@@ -111,6 +126,7 @@ class AcceloClient {
         'Accept': 'application/json',
       },
       body: formBody.toString(),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!resp.ok) {

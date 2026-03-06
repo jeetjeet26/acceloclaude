@@ -1,6 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
+const { AcceloClient } = require('../services/accelo-client');
 
 function registerProjectTools(server, client) {
   // List projects
@@ -21,8 +22,12 @@ function registerProjectTools(server, client) {
         '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,staff',
       };
       if (search) params['_search'] = search;
-      if (company_id) params['company_id'] = company_id;
-      if (status && status !== 'all') params['standing'] = status;
+
+      const filters = [];
+      if (company_id) filters.push(`against(company(${company_id}))`);
+      if (status && status !== 'all') filters.push(`standing(${status})`);
+      const filterStr = AcceloClient.buildFilters(filters);
+      if (filterStr) params['_filters'] = filterStr;
 
       const { data, meta } = await client.get('/jobs', params);
       const projects = Array.isArray(data) ? data : (data ? [data] : []);

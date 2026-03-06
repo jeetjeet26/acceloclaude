@@ -1,6 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
+const { AcceloClient } = require('../services/accelo-client');
 
 function registerSalesTools(server, client) {
   // List prospects/sales
@@ -21,8 +22,12 @@ function registerSalesTools(server, client) {
         '_fields': 'title,standing,company_id,contact_id,manager_id,date_created,date_due,value,probability',
       };
       if (search) params['_search'] = search;
-      if (company_id) params['company_id'] = company_id;
-      if (status && status !== 'all') params['standing'] = status;
+
+      const filters = [];
+      if (company_id) filters.push(`company(${company_id})`);
+      if (status && status !== 'all') filters.push(`standing(${status})`);
+      const filterStr = AcceloClient.buildFilters(filters);
+      if (filterStr) params['_filters'] = filterStr;
 
       const { data, meta } = await client.get('/prospects', params);
       const prospects = Array.isArray(data) ? data : (data ? [data] : []);
@@ -88,21 +93,25 @@ function registerStaffTools(server, client) {
   // Get invoices
   server.tool(
     'list_invoices',
-    'List invoices in Accelo, optionally filtered by company or status.',
+    'List invoices in Accelo. Supports filtering by affiliation, date range, and search. Note: the Accelo API does not support filtering invoices directly by company_id or standing.',
     {
-      company_id: z.string().optional().describe('Filter by company'),
-      status: z.enum(['draft', 'sent', 'paid', 'overdue', 'all']).optional().default('all'),
+      affiliation_id: z.string().optional().describe('Filter by affiliation ID (links invoices to a company/contact)'),
+      search: z.string().optional().describe('Search invoices by subject'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
     },
-    async ({ company_id, status, limit, page }) => {
+    async ({ affiliation_id, search, limit, page }) => {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'standing,company_id,date_created,date_due,date_paid,amount,tax,against_type,against_id',
+        '_fields': 'subject,outstanding,amount,tax,affiliation_id,against_type,against_id,date_raised,date_due,date_modified,owner_id,invoice_number',
       };
-      if (company_id) params['company_id'] = company_id;
-      if (status && status !== 'all') params['standing'] = status;
+      if (search) params['_search'] = search;
+
+      const filters = [];
+      if (affiliation_id) filters.push(`affiliation(${affiliation_id})`);
+      const filterStr = AcceloClient.buildFilters(filters);
+      if (filterStr) params['_filters'] = filterStr;
 
       const { data, meta } = await client.get('/invoices', params);
       const invoices = Array.isArray(data) ? data : (data ? [data] : []);
@@ -113,15 +122,16 @@ function registerStaffTools(server, client) {
           text: JSON.stringify({
             invoices: invoices.map(i => ({
               id: i.id,
-              status: i.standing,
-              company_id: i.company_id,
-              date_created: i.date_created,
-              date_due: i.date_due,
-              date_paid: i.date_paid,
+              subject: i.subject,
+              invoice_number: i.invoice_number,
               amount: i.amount,
               tax: i.tax,
+              outstanding: i.outstanding,
+              affiliation_id: i.affiliation_id,
               against_type: i.against_type,
               against_id: i.against_id,
+              date_raised: i.date_raised,
+              date_due: i.date_due,
             })),
             total: meta.more_info?.total_count || invoices.length,
           }, null, 2),
