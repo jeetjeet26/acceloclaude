@@ -2,8 +2,22 @@
 
 const { z } = require('zod');
 
+function buildAcceloFilters(opts) {
+  const parts = [];
+  if (opts.against_type) parts.push(`against_type(${opts.against_type})`);
+  if (opts.against_id) parts.push(`against_id(${opts.against_id})`);
+  if (opts.staff_id) parts.push(`staff(${opts.staff_id})`);
+  if (opts.medium) parts.push(`medium(${opts.medium})`);
+  if (opts.owner_id) parts.push(`owner_id(${opts.owner_id})`);
+  if (opts.date_created_after) parts.push(`date_created_after(${opts.date_created_after})`);
+  if (opts.date_created_before) parts.push(`date_created_before(${opts.date_created_before})`);
+  if (opts.date_logged_after) parts.push(`date_logged_after(${opts.date_logged_after})`);
+  if (opts.date_logged_before) parts.push(`date_logged_before(${opts.date_logged_before})`);
+  if (opts.order_by) parts.push(`order_by_desc(${opts.order_by})`);
+  return parts.length ? parts.join(',') : undefined;
+}
+
 function registerActivityTools(server, client) {
-  // List activities (emails, calls, notes, timesheets)
   server.tool(
     'list_activities',
     'List activities (emails, calls, notes, time entries) in Accelo. Activities are associated with companies, contacts, projects, or requests.',
@@ -23,11 +37,14 @@ function registerActivityTools(server, client) {
         '_page': page,
         '_fields': 'subject,body,date_created,date_modified,date_logged,owner_id,against_type,against_id,medium,thread_id,billable,nonbillable,staff,rate_charged',
       };
-      if (against_type) params['against_type'] = against_type;
-      if (against_id) params['against_id'] = against_id;
-      if (activity_type && activity_type !== 'all') params['medium'] = activity_type;
-      if (date_after) params['date_created_after'] = Math.floor(new Date(date_after).getTime() / 1000);
-      if (date_before) params['date_created_before'] = Math.floor(new Date(date_before).getTime() / 1000);
+      const filters = buildAcceloFilters({
+        against_type,
+        against_id,
+        medium: activity_type && activity_type !== 'all' ? activity_type : undefined,
+        date_created_after: date_after ? Math.floor(new Date(date_after).getTime() / 1000) : undefined,
+        date_created_before: date_before ? Math.floor(new Date(date_before).getTime() / 1000) : undefined,
+      });
+      if (filters) params['_filters'] = filters;
 
       const { data, meta } = await client.get('/activities', params);
       const activities = Array.isArray(data) ? data : (data ? [data] : []);
@@ -58,10 +75,9 @@ function registerActivityTools(server, client) {
     }
   );
 
-  // List time entries via /activities (service-app compatible; /timers/* is user-only)
   server.tool(
     'list_time_entries',
-    'List activities with time logged in Accelo. Returns billable/nonbillable hours per activity. Works with service applications (unlike /timers endpoints).',
+    'List activities with time logged in Accelo, ordered by most billable time first. Returns billable/nonbillable hours per activity.',
     {
       staff_id: z.string().optional().describe('Filter by staff member ID who logged time'),
       against_type: z.enum(['company', 'contact', 'prospect', 'job', 'issue', 'request', 'task']).optional()
@@ -78,11 +94,15 @@ function registerActivityTools(server, client) {
         '_page': page,
         '_fields': 'subject,medium,date_logged,billable,nonbillable,rate_charged,against_type,against_id,staff,task,standing',
       };
-      if (staff_id) params['staff'] = staff_id;
-      if (against_type) params['against_type'] = against_type;
-      if (against_id) params['against_id'] = against_id;
-      if (date_after) params['date_logged_after'] = Math.floor(new Date(date_after).getTime() / 1000);
-      if (date_before) params['date_logged_before'] = Math.floor(new Date(date_before).getTime() / 1000);
+      const filters = buildAcceloFilters({
+        against_type,
+        against_id,
+        staff_id,
+        date_logged_after: date_after ? Math.floor(new Date(date_after).getTime() / 1000) : undefined,
+        date_logged_before: date_before ? Math.floor(new Date(date_before).getTime() / 1000) : undefined,
+        order_by: 'billable',
+      });
+      if (filters) params['_filters'] = filters;
 
       const { data, meta } = await client.get('/activities', params);
       const activities = Array.isArray(data) ? data : (data ? [data] : []);
@@ -115,14 +135,12 @@ function registerActivityTools(server, client) {
               total_nonbillable_hours: (withTime.reduce((s, a) => s + Number(a.nonbillable), 0) / 3600).toFixed(2),
             },
             total: meta.more_info?.total_count || activities.length,
-            note: 'Uses /activities endpoint (service-app compatible). For aggregated totals across all matching activities use get_time_allocations.',
           }, null, 2),
         }],
       };
     }
   );
 
-  // Aggregated time allocations across activities
   server.tool(
     'get_time_allocations',
     'Get total billable/nonbillable hours and amount charged across activities. Useful for time reports by project, staff, or date range.',
@@ -136,11 +154,14 @@ function registerActivityTools(server, client) {
     },
     async ({ staff_id, against_type, against_id, date_after, date_before }) => {
       const params = {};
-      if (staff_id) params['staff'] = staff_id;
-      if (against_type) params['against_type'] = against_type;
-      if (against_id) params['against_id'] = against_id;
-      if (date_after) params['date_logged_after'] = Math.floor(new Date(date_after).getTime() / 1000);
-      if (date_before) params['date_logged_before'] = Math.floor(new Date(date_before).getTime() / 1000);
+      const filters = buildAcceloFilters({
+        against_type,
+        against_id,
+        staff_id,
+        date_logged_after: date_after ? Math.floor(new Date(date_after).getTime() / 1000) : undefined,
+        date_logged_before: date_before ? Math.floor(new Date(date_before).getTime() / 1000) : undefined,
+      });
+      if (filters) params['_filters'] = filters;
 
       const { data } = await client.get('/activities/allocations', params);
 
