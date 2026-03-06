@@ -152,6 +152,6 @@ app.listen(PORT, () => {
   console.log('   - list_issues, get_issue, create_issue');
   console.log('   - list_retainers, get_retainer');
   console.log('   - list_requests, get_request');
-  console.log('   - list_activities, list_time_entries');
+  console.log('   - list_activities, list_time_entries, get_time_allocations');
   console.log('   - list_prospects, list_staff, list_invoices\n');
 });

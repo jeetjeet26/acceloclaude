@@ -21,7 +21,7 @@ function registerActivityTools(server, client) {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'subject,body,date_created,date_modified,owner_id,against_type,against_id,medium,thread_id',
+        '_fields': 'subject,body,date_created,date_modified,date_logged,owner_id,against_type,against_id,medium,thread_id,billable,nonbillable,staff,rate_charged',
       };
       if (against_type) params['against_type'] = against_type;
       if (against_id) params['against_id'] = against_id;
@@ -43,7 +43,12 @@ function registerActivityTools(server, client) {
               against_type: a.against_type,
               against_id: a.against_id,
               owner_id: a.owner_id,
+              staff_id: typeof a.staff === 'object' ? a.staff?.id : a.staff,
               date_created: a.date_created,
+              date_logged: a.date_logged,
+              billable_hours: Number(a.billable) ? (Number(a.billable) / 3600).toFixed(2) : null,
+              nonbillable_hours: Number(a.nonbillable) ? (Number(a.nonbillable) / 3600).toFixed(2) : null,
+              rate_charged: a.rate_charged,
               body_preview: a.body ? a.body.substring(0, 200) + (a.body.length > 200 ? '...' : '') : null,
             })),
             total: meta.more_info?.total_count || activities.length,
@@ -53,49 +58,100 @@ function registerActivityTools(server, client) {
     }
   );
 
-  // List timesheets / time entries
+  // List time entries via /activities (service-app compatible; /timers/* is user-only)
   server.tool(
     'list_time_entries',
-    'List time entries/timesheets logged in Accelo, optionally filtered by staff, project, or date range.',
+    'List activities with time logged in Accelo. Returns billable/nonbillable hours per activity. Works with service applications (unlike /timers endpoints).',
     {
-      staff_id: z.string().optional().describe('Filter by staff member ID'),
-      against_type: z.enum(['job', 'issue', 'task', 'milestone']).optional().describe('Filter by what the time was logged against'),
-      against_id: z.string().optional().describe('ID of the project/task (requires against_type)'),
-      date_after: z.string().optional().describe('Start date filter (YYYY-MM-DD)'),
-      date_before: z.string().optional().describe('End date filter (YYYY-MM-DD)'),
-      limit: z.number().int().min(1).max(100).optional().default(20),
+      staff_id: z.string().optional().describe('Filter by staff member ID who logged time'),
+      against_type: z.enum(['company', 'contact', 'prospect', 'job', 'issue', 'request', 'task']).optional()
+        .describe('Filter by what the time was logged against'),
+      against_id: z.string().optional().describe('ID of the object (requires against_type)'),
+      date_after: z.string().optional().describe('Only entries logged after this date (YYYY-MM-DD)'),
+      date_before: z.string().optional().describe('Only entries logged before this date (YYYY-MM-DD)'),
+      limit: z.number().int().min(1).max(100).optional().default(50),
       page: z.number().int().min(0).optional().default(0),
     },
     async ({ staff_id, against_type, against_id, date_after, date_before, limit, page }) => {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'date_logged,quantity,against_type,against_id,staff_id,nonbillable,rate_charged,activity_id',
+        '_fields': 'subject,medium,date_logged,billable,nonbillable,rate_charged,against_type,against_id,staff,task,standing',
       };
-      if (staff_id) params['staff_id'] = staff_id;
+      if (staff_id) params['staff'] = staff_id;
       if (against_type) params['against_type'] = against_type;
       if (against_id) params['against_id'] = against_id;
       if (date_after) params['date_logged_after'] = Math.floor(new Date(date_after).getTime() / 1000);
       if (date_before) params['date_logged_before'] = Math.floor(new Date(date_before).getTime() / 1000);
 
-      const { data, meta } = await client.get('/timers/time-entries', params);
-      const entries = Array.isArray(data) ? data : (data ? [data] : []);
+      const { data, meta } = await client.get('/activities', params);
+      const activities = Array.isArray(data) ? data : (data ? [data] : []);
+
+      const withTime = activities.filter(a => Number(a.billable) > 0 || Number(a.nonbillable) > 0);
 
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            time_entries: entries.map(e => ({
-              id: e.id,
-              date: e.date_logged,
-              hours: (e.quantity / 3600).toFixed(2),
-              against_type: e.against_type,
-              against_id: e.against_id,
-              staff_id: e.staff_id,
-              billable: !e.nonbillable,
-              rate: e.rate_charged,
+            time_entries: withTime.map(a => ({
+              id: a.id,
+              subject: a.subject,
+              medium: a.medium,
+              date_logged: a.date_logged,
+              billable_hours: (Number(a.billable) / 3600).toFixed(2),
+              nonbillable_hours: (Number(a.nonbillable) / 3600).toFixed(2),
+              total_hours: ((Number(a.billable) + Number(a.nonbillable)) / 3600).toFixed(2),
+              rate_charged: a.rate_charged,
+              against_type: a.against_type,
+              against_id: a.against_id,
+              staff_id: typeof a.staff === 'object' ? a.staff?.id : a.staff,
+              task_id: typeof a.task === 'object' ? a.task?.id : a.task,
+              standing: a.standing,
             })),
-            total: meta.more_info?.total_count || entries.length,
+            summary: {
+              activities_with_time: withTime.length,
+              total_activities_returned: activities.length,
+              total_billable_hours: (withTime.reduce((s, a) => s + Number(a.billable), 0) / 3600).toFixed(2),
+              total_nonbillable_hours: (withTime.reduce((s, a) => s + Number(a.nonbillable), 0) / 3600).toFixed(2),
+            },
+            total: meta.more_info?.total_count || activities.length,
+            note: 'Uses /activities endpoint (service-app compatible). For aggregated totals across all matching activities use get_time_allocations.',
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // Aggregated time allocations across activities
+  server.tool(
+    'get_time_allocations',
+    'Get total billable/nonbillable hours and amount charged across activities. Useful for time reports by project, staff, or date range.',
+    {
+      staff_id: z.string().optional().describe('Filter by staff member ID'),
+      against_type: z.enum(['company', 'contact', 'prospect', 'job', 'issue', 'request', 'task']).optional()
+        .describe('Filter by object type'),
+      against_id: z.string().optional().describe('ID of the object (requires against_type)'),
+      date_after: z.string().optional().describe('Only time logged after this date (YYYY-MM-DD)'),
+      date_before: z.string().optional().describe('Only time logged before this date (YYYY-MM-DD)'),
+    },
+    async ({ staff_id, against_type, against_id, date_after, date_before }) => {
+      const params = {};
+      if (staff_id) params['staff'] = staff_id;
+      if (against_type) params['against_type'] = against_type;
+      if (against_id) params['against_id'] = against_id;
+      if (date_after) params['date_logged_after'] = Math.floor(new Date(date_after).getTime() / 1000);
+      if (date_before) params['date_logged_before'] = Math.floor(new Date(date_before).getTime() / 1000);
+
+      const { data } = await client.get('/activities/allocations', params);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            billable_hours: (Number(data.billable || 0) / 3600).toFixed(2),
+            nonbillable_hours: (Number(data.unbillable || data.nonbillable || 0) / 3600).toFixed(2),
+            total_hours: ((Number(data.billable || 0) + Number(data.unbillable || data.nonbillable || 0)) / 3600).toFixed(2),
+            total_charged: data.charged || '0.00',
           }, null, 2),
         }],
       };
