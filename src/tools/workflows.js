@@ -2,6 +2,8 @@
 
 const { z } = require('zod');
 
+const idParam = z.union([z.string(), z.number()]).transform(String);
+
 function buildFilters(opts) {
   const parts = [];
   for (const [k, v] of Object.entries(opts)) {
@@ -17,7 +19,7 @@ function registerContributorTools(server, client) {
     {
       against_type: z.enum(['job', 'issue', 'prospect', 'contract', 'milestone']).optional()
         .describe('Filter by what the contributor is assigned to'),
-      against_id: z.string().optional().describe('ID of the object (requires against_type)'),
+      against_id: idParam.optional().describe('ID of the object (requires against_type)'),
       object_type: z.enum(['staff', 'affiliation']).optional().describe('Filter by contributor type (staff or external contact)'),
       standing: z.enum(['active', 'inactive', 'all']).optional().default('all'),
       limit: z.number().int().min(1).max(100).optional().default(50),
@@ -70,8 +72,8 @@ function registerProgressionTools(server, client) {
     {
       against_type: z.enum(['job', 'issue', 'prospect', 'task', 'milestone', 'company', 'contract', 'affiliation', 'contact']).optional()
         .describe('Filter by object type'),
-      against_id: z.string().optional().describe('ID of the specific object'),
-      modified_by: z.string().optional().describe('Filter by staff member who made the change'),
+      against_id: idParam.optional().describe('ID of the specific object'),
+      modified_by: idParam.optional().describe('Filter by staff member who made the change'),
       date_after: z.string().optional().describe('Only changes after this date (YYYY-MM-DD)'),
       date_before: z.string().optional().describe('Only changes before this date (YYYY-MM-DD)'),
       limit: z.number().int().min(1).max(100).optional().default(50),
@@ -121,7 +123,7 @@ function registerProgressionTools(server, client) {
     {
       resource_type: z.enum(['jobs', 'issues', 'prospects', 'tasks', 'milestones', 'companies', 'contracts', 'affiliations', 'contacts'])
         .describe('The resource type (plural)'),
-      resource_id: z.string().describe('The ID of the specific object'),
+      resource_id: idParam.describe('The ID of the specific object'),
     },
     async ({ resource_type, resource_id }) => {
       const { data } = await client.get(`/${resource_type}/${resource_id}/progressions`);
@@ -191,7 +193,7 @@ function registerSignoffTools(server, client) {
     'List signoffs (client approval workflows) in Accelo. Tracks approval status for work on jobs/projects.',
     {
       against_type: z.enum(['job', 'issue', 'milestone']).optional().describe('Filter by object type'),
-      against_id: z.string().optional().describe('ID of the object'),
+      against_id: idParam.optional().describe('ID of the object'),
       standing: z.enum(['draft', 'sent', 'approved', 'declined', 'all']).optional().default('all'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
@@ -242,8 +244,8 @@ function registerResourceTools(server, client) {
     'list_resources',
     'List resources (file attachments) uploaded to Accelo. Can filter by collection or activity.',
     {
-      collection_id: z.string().optional().describe('Filter by collection/folder ID'),
-      activity_id: z.string().optional().describe('Filter by the activity the resource was uploaded through'),
+      collection_id: idParam.optional().describe('Filter by collection/folder ID'),
+      activity_id: idParam.optional().describe('Filter by the activity the resource was uploaded through'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
     },

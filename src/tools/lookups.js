@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 
+const idParam = z.union([z.string(), z.number()]).transform(String);
 const ENTITY_TYPES = ['jobs', 'companies', 'contacts', 'contracts', 'issues', 'prospects', 'affiliations', 'milestones', 'invoices', 'staff', 'expenses', 'assets', 'contributors', 'purchases'];
 
 function buildFilters(opts) {
@@ -111,7 +112,7 @@ function registerLookupTools(server, client) {
     {
       search: z.string().optional().describe('Search by tag name'),
       against_type: z.string().optional().describe('Filter to tags on this object type (e.g. "job")'),
-      against_id: z.string().optional().describe('Filter to tags on this specific object (requires against_type)'),
+      against_id: idParam.optional().describe('Filter to tags on this specific object (requires against_type)'),
       limit: z.number().int().min(1).max(100).optional().default(50),
     },
     async ({ search, against_type, against_id, limit }) => {
@@ -146,7 +147,7 @@ function registerLookupTools(server, client) {
     'list_groups',
     'List staff groups in Accelo.',
     {
-      staff_id: z.string().optional().describe('Filter to groups this staff member belongs to'),
+      staff_id: idParam.optional().describe('Filter to groups this staff member belongs to'),
       search: z.string().optional().describe('Search by group title'),
     },
     async ({ staff_id, search }) => {
@@ -184,7 +185,7 @@ function registerLookupTools(server, client) {
     'List expenses in Accelo. Tracks costs incurred against jobs, issues, or contracts.',
     {
       against_type: z.enum(['job', 'issue', 'contract_period']).optional().describe('Filter by what the expense is against'),
-      against_id: z.string().optional().describe('ID of the object'),
+      against_id: idParam.optional().describe('ID of the object'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
     },
@@ -264,7 +265,7 @@ function registerLookupTools(server, client) {
     'List custom/profile field values. Can get values for a specific object or all values across an entity type.',
     {
       entity: z.enum(ENTITY_TYPES).describe('The entity type'),
-      object_id: z.string().optional().describe('Specific object ID to get profile values for (omit for all)'),
+      object_id: idParam.optional().describe('Specific object ID to get profile values for (omit for all)'),
     },
     async ({ entity, object_id }) => {
       const path = object_id

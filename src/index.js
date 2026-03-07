@@ -159,7 +159,7 @@ app.listen(PORT, () => {
   }
   console.log('\n   Available tools:');
   console.log('   - list_companies, get_company, list_contacts, create_company, add_company_manager');
-  console.log('   - list_projects, get_project, list_project_tasks, create_job, create_task');
+  console.log('   - list_projects, get_project, list_project_milestones, list_project_tasks, create_job, create_task');
   console.log('   - list_issues, get_issue, create_issue');
   console.log('   - list_retainers, get_retainer');
   console.log('   - list_requests, get_request');

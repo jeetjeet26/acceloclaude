@@ -2,6 +2,8 @@
 
 const { z } = require('zod');
 
+const idParam = z.union([z.string(), z.number()]).transform(String);
+
 function buildFilters(opts) {
   const parts = [];
   for (const [k, v] of Object.entries(opts)) {
@@ -16,9 +18,9 @@ function registerQuoteTools(server, client) {
     'List quotes/proposals in Accelo. Quotes link prospects to priced work and are essential for financial planning.',
     {
       against_type: z.enum(['prospect', 'job', 'issue']).optional().describe('Filter by object type the quote is against'),
-      against_id: z.string().optional().describe('ID of the object (requires against_type)'),
+      against_id: idParam.optional().describe('ID of the object (requires against_type)'),
       standing: z.enum(['draft', 'sent', 'accepted', 'declined', 'all']).optional().default('all'),
-      manager_id: z.string().optional().describe('Filter by managing staff member ID'),
+      manager_id: idParam.optional().describe('Filter by managing staff member ID'),
       search: z.string().optional().describe('Search by quote title'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
@@ -72,7 +74,7 @@ function registerQuoteTools(server, client) {
     'get_quote',
     'Get full details for a specific Accelo quote/proposal by ID, including introduction, conclusion, and terms.',
     {
-      quote_id: z.string().describe('The Accelo quote ID'),
+      quote_id: idParam.describe('The Accelo quote ID'),
     },
     async ({ quote_id }) => {
       const { data } = await client.get(`/quotes/${quote_id}`, {
@@ -94,8 +96,8 @@ function registerPurchaseTools(server, client) {
     'list_purchases',
     'List purchases (vendor costs / procurement) in Accelo. Tracks expenses made when completing jobs, issues, or contracts.',
     {
-      owner_id: z.string().optional().describe('Filter by staff owner ID'),
-      affiliation_id: z.string().optional().describe('Filter by affiliation/vendor'),
+      owner_id: idParam.optional().describe('Filter by staff owner ID'),
+      affiliation_id: idParam.optional().describe('Filter by affiliation/vendor'),
       search: z.string().optional().describe('Search by purchase title'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
