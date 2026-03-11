@@ -68,28 +68,49 @@ class AcceloClient {
     return this.accessToken;
   }
 
-  async get(path, params = {}) {
-    const token = await this.getToken();
+  buildUrl(path, params = {}) {
     const url = new URL(`${this.baseUrl}${path}`);
 
-    // Standard Accelo fields/pagination params
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null && v !== '') {
         url.searchParams.set(k, String(v));
       }
     }
 
+    return url;
+  }
+
+  buildFormBody(body = {}) {
+    const formBody = new URLSearchParams();
+
+    for (const [k, v] of Object.entries(body)) {
+      if (v !== undefined && v !== null && v !== '') {
+        formBody.set(k, String(v));
+      }
+    }
+
+    return formBody.toString();
+  }
+
+  async request(method, path, { params = {}, body } = {}) {
+    const token = await this.getToken();
+    const url = this.buildUrl(path, params);
+    const hasBody = body !== undefined;
+
     const resp = await fetch(url.toString(), {
+      method,
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/json',
+        ...(hasBody ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
       },
+      ...(hasBody ? { body: this.buildFormBody(body) } : {}),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!resp.ok) {
       const text = await resp.text();
-      throw new Error(`Accelo API error ${resp.status} on ${path}: ${text}`);
+      throw new Error(`Accelo API error ${resp.status} on ${method} ${path}: ${text}`);
     }
 
     const json = await resp.json();
@@ -101,45 +122,16 @@ class AcceloClient {
     return { data: json, meta: {} };
   }
 
+  async get(path, params = {}) {
+    return this.request('GET', path, { params });
+  }
+
   async post(path, body = {}, params = {}) {
-    const token = await this.getToken();
-    const url = new URL(`${this.baseUrl}${path}`);
+    return this.request('POST', path, { body, params });
+  }
 
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== null && v !== '') {
-        url.searchParams.set(k, String(v));
-      }
-    }
-
-    const formBody = new URLSearchParams();
-    for (const [k, v] of Object.entries(body)) {
-      if (v !== undefined && v !== null && v !== '') {
-        formBody.set(k, String(v));
-      }
-    }
-
-    const resp = await fetch(url.toString(), {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-      },
-      body: formBody.toString(),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`Accelo API error ${resp.status} on POST ${path}: ${text}`);
-    }
-
-    const json = await resp.json();
-
-    if (json.response !== undefined) {
-      return { data: json.response, meta: json.meta || {} };
-    }
-    return { data: json, meta: {} };
+  async put(path, body = {}, params = {}) {
+    return this.request('PUT', path, { body, params });
   }
 }
 

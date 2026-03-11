@@ -5,6 +5,31 @@ const { AcceloClient } = require('../services/accelo-client');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 
+function buildDefinedBody(params, excludedKeys = []) {
+  const body = {};
+
+  for (const [key, value] of Object.entries(params)) {
+    if (!excludedKeys.includes(key) && value !== undefined) {
+      body[key] = value;
+    }
+  }
+
+  return body;
+}
+
+async function updateJob(client, jobId, updates) {
+  const body = buildDefinedBody(updates);
+  if (!Object.keys(body).length) {
+    throw new Error('Provide at least one field to update');
+  }
+
+  const { data } = await client.put(`/jobs/${jobId}`, body, {
+    '_fields': 'title,standing,company_id,manager_id,description,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,job_type',
+  });
+
+  return data;
+}
+
 function registerProjectTools(server, client) {
   // List projects
   server.tool(
@@ -184,7 +209,50 @@ function registerProjectTools(server, client) {
       }
     }
   );
-  // Create a task (POST only — no edit, no delete)
+  // Update an existing task
+  server.tool(
+    'update_task',
+    'Update an existing Accelo task. Use this to edit task title, description, assignment, status, or dates.',
+    {
+      task_id: idParam.describe('The Accelo task ID to update'),
+      title: z.string().optional().describe('New title for the task'),
+      description: z.string().optional().describe('Updated description of the task'),
+      status_id: idParam.optional().describe('ID of the updated task status'),
+      manager_id: idParam.optional().describe('Staff ID of the task manager'),
+      assignee_id: idParam.optional().describe('Staff ID to assign the task to'),
+      affiliation_id: idParam.optional().describe('Affiliation ID to link to the task'),
+      priority_id: idParam.optional().describe('Priority ID for the task'),
+      date_started: z.string().optional().describe('Start date as unix timestamp'),
+      date_due: z.string().optional().describe('Due date as unix timestamp'),
+      date_completed: z.string().optional().describe('Completion date as unix timestamp'),
+    },
+    async ({ task_id, ...updates }) => {
+      try {
+        const body = buildDefinedBody(updates);
+        if (!Object.keys(body).length) {
+          throw new Error('Provide at least one field to update');
+        }
+
+        const { data } = await client.put(`/tasks/${task_id}`, body, {
+          '_fields': 'title,standing,date_created,date_started,date_due,date_completed,assignee,against_type,against_id,manager_id,description',
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ updated_task: data }, null, 2),
+          }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `update_task failed: ${err.message}` }],
+        };
+      }
+    }
+  );
+
+  // Create a task
   server.tool(
     'create_task',
     'Create a new task in Accelo. Link it to a job, issue, or other object via against_type + against_id.',
@@ -203,10 +271,7 @@ function registerProjectTools(server, client) {
     },
     async (params) => {
       try {
-        const body = {};
-        for (const [key, value] of Object.entries(params)) {
-          if (value !== undefined) body[key] = value;
-        }
+        const body = buildDefinedBody(params);
 
         const { data } = await client.post('/tasks', body, {
           '_fields': 'title,standing,date_created,date_started,date_due,date_completed,assignee,against_type,against_id,manager_id,description',
@@ -227,7 +292,82 @@ function registerProjectTools(server, client) {
     }
   );
 
-  // Create a new job/project (POST only — no edit, no delete)
+  // Update an existing job/project
+  server.tool(
+    'update_job',
+    'Update an existing Accelo job (project). Use this to edit project title, description, manager, status, billing, or dates.',
+    {
+      job_id: idParam.describe('The Accelo job/project ID to update'),
+      title: z.string().optional().describe('Updated title for the job'),
+      description: z.string().optional().describe('Updated description for the job'),
+      manager_id: idParam.optional().describe('Staff ID of the job manager'),
+      status_id: idParam.optional().describe('ID of the updated job status'),
+      affiliation_id: idParam.optional().describe('Affiliation ID to link to the job'),
+      contract_id: idParam.optional().describe('Contract ID to link to the job'),
+      rate_id: idParam.optional().describe('Rate ID for the job'),
+      rate_charged: z.string().optional().describe('Rate charged for billable work'),
+      date_due: z.string().optional().describe('Due date as unix timestamp'),
+      date_started: z.string().optional().describe('Start date as unix timestamp'),
+      date_completed: z.string().optional().describe('Completion date as unix timestamp'),
+      is_billable: z.enum(['yes', 'no']).optional().describe('Whether the job is billable'),
+    },
+    async ({ job_id, ...updates }) => {
+      try {
+        const data = await updateJob(client, job_id, updates);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ updated_job: data }, null, 2),
+          }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `update_job failed: ${err.message}` }],
+        };
+      }
+    }
+  );
+
+  server.tool(
+    'update_project',
+    'Update an existing Accelo project. Alias for update_job that accepts project_id to match the project-oriented tools.',
+    {
+      project_id: idParam.describe('The Accelo project ID to update'),
+      title: z.string().optional().describe('Updated title for the project'),
+      description: z.string().optional().describe('Updated description for the project'),
+      manager_id: idParam.optional().describe('Staff ID of the project manager'),
+      status_id: idParam.optional().describe('ID of the updated project status'),
+      affiliation_id: idParam.optional().describe('Affiliation ID to link to the project'),
+      contract_id: idParam.optional().describe('Contract ID to link to the project'),
+      rate_id: idParam.optional().describe('Rate ID for the project'),
+      rate_charged: z.string().optional().describe('Rate charged for billable work'),
+      date_due: z.string().optional().describe('Due date as unix timestamp'),
+      date_started: z.string().optional().describe('Start date as unix timestamp'),
+      date_completed: z.string().optional().describe('Completion date as unix timestamp'),
+      is_billable: z.enum(['yes', 'no']).optional().describe('Whether the project is billable'),
+    },
+    async ({ project_id, ...updates }) => {
+      try {
+        const data = await updateJob(client, project_id, updates);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ updated_project: data }, null, 2),
+          }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `update_project failed: ${err.message}` }],
+        };
+      }
+    }
+  );
+
+  // Create a new job/project
   server.tool(
     'create_job',
     'Create a new job (project) in Accelo. Returns the created job. Only type_id is required; provide against_type + against_id to link to a company or other object.',
@@ -248,10 +388,7 @@ function registerProjectTools(server, client) {
     },
     async (params) => {
       try {
-        const body = {};
-        for (const [key, value] of Object.entries(params)) {
-          if (value !== undefined) body[key] = value;
-        }
+        const body = buildDefinedBody(params);
 
         const { data } = await client.post('/jobs', body, {
           '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,job_type',

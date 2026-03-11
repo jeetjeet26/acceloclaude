@@ -1,6 +1,6 @@
 # accelo-mcp
 
-Read-only Accelo connector for Claude. Exposes 15 tools covering companies, contacts, projects, tickets, retainers, activities, time entries, prospects, staff, and invoices.
+Accelo connector for Claude with read and limited write support. It exposes tools covering companies, contacts, projects, tickets, retainers, activities, time entries, prospects, staff, and invoices.
 
 ## Setup
 
@@ -82,7 +82,12 @@ pm2 start src/index.js --name accelo-mcp
 | `list_contacts` | List/search contacts, filter by company |
 | `list_projects` | List projects, filter by status/company |
 | `get_project` | Full project details |
+| `create_job` | Create a new job/project |
+| `update_job` | Update an existing job/project |
+| `update_project` | Update an existing project via project-oriented naming |
 | `list_project_tasks` | Tasks/milestones for a project |
+| `create_task` | Create a new task |
+| `update_task` | Update an existing task |
 | `list_issues` | List tickets, filter by status/assignee |
 | `get_issue` | Full ticket details |
 | `list_retainers` | List retainer contracts |
@@ -95,4 +100,4 @@ pm2 start src/index.js --name accelo-mcp
 | `list_staff` | Staff members |
 | `list_invoices` | Invoices by company/status |
 
-All tools are **read-only** — no POST/PUT/DELETE calls are made.
+Write support currently includes creating companies, jobs, issues, and tasks, plus updating jobs and tasks. Delete operations are not exposed.
