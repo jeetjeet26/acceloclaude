@@ -158,16 +158,16 @@ app.listen(PORT, () => {
     console.log('   Auth: No token set (set MCP_AUTH_TOKEN to secure)');
   }
   console.log('\n   Available tools:');
-  console.log('   - list_companies, get_company, list_contacts, create_company, add_company_manager');
+  console.log('   - list_companies, get_company, list_contacts, get_contact, create_company, add_company_manager');
   console.log('   - list_projects, get_project, list_project_milestones, list_project_tasks, create_job, update_job, update_project, create_task, update_task');
   console.log('   - list_issues, get_issue, create_issue');
   console.log('   - list_retainers, get_retainer');
   console.log('   - list_requests, get_request');
   console.log('   - list_activities, list_time_entries, get_time_allocations');
-  console.log('   - list_prospects, list_staff, list_invoices');
+  console.log('   - list_prospects, get_prospect, list_staff, list_invoices');
   console.log('   - list_quotes, get_quote, list_purchases');
   console.log('   - list_contributors, list_progression_history, list_progressions');
   console.log('   - list_segmentations, list_signoffs, list_resources');
   console.log('   - list_statuses, list_entity_types, list_rates, list_tags');
-  console.log('   - list_groups, list_expenses, list_profile_fields, list_profile_values\n');
+  console.log('   - list_groups, list_expenses, list_profile_fields, list_profile_values, list_extension_fields, list_extension_values\n');
 });

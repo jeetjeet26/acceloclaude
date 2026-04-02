@@ -2,6 +2,13 @@
 
 const { z } = require('zod');
 const { AcceloClient } = require('../services/accelo-client');
+const { listAcceloCollection } = require('../services/accelo-pagination');
+const {
+  attachAcceloCustomFields,
+  normalizeAcceloList,
+  resolveAcceloFields,
+  withAcceloAliases,
+} = require('../services/accelo-response');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 
@@ -15,14 +22,15 @@ function registerCompanyTools(server, client) {
       status: z.enum(['active', 'inactive', 'all']).optional().default('active').describe('Filter by status'),
       limit: z.number().int().min(1).max(100).optional().default(20).describe('Max results (1-100)'),
       page: z.number().int().min(0).optional().default(0).describe('Page offset'),
-      fields: z.string().optional().describe('Extra fields to include, e.g. "postal_address,phone,website"'),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL". Supports linked syntax like "postal_address(),manager()".'),
     },
-    async ({ search, status, limit, page, fields }) => {
+    async ({ search, status, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': fields || 'name,phone,website,standing',
+          '_fields': resolveAcceloFields(fields),
         };
         if (search) params['_search'] = search;
 
@@ -31,23 +39,32 @@ function registerCompanyTools(server, client) {
         const filterStr = AcceloClient.buildFilters(filters);
         if (filterStr) params['_filters'] = filterStr;
 
-        const { data, meta } = await client.get('/companies', params);
-        const companies = Array.isArray(data) ? data : [data];
+        const result = await listAcceloCollection(client, {
+          path: '/companies',
+          params,
+          fetchAll: fetch_all,
+        });
+        const companies = result.items;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               companies: companies.map(c => ({
-                id: c.id,
-                name: c.name,
-                phone: c.phone,
-                website: c.website,
+                ...withAcceloAliases(c, {
+                  status_id: 'status',
+                }),
                 status: c.standing,
-                ...c,
               })),
-              total: meta.more_info?.total_count || companies.length,
-              page,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -63,21 +80,33 @@ function registerCompanyTools(server, client) {
   // Get single company
   server.tool(
     'get_company',
-    'Get full details for a specific Accelo company by ID.',
+    'Get full details for a specific Accelo company by ID, including profile values by default.',
     {
       company_id: idParam.describe('The Accelo company ID'),
-      fields: z.string().optional().describe('Extra fields, e.g. "postal_address,contacts,staff"'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
+      include_profile_values: z.boolean().optional().default(true).describe('Include company profile/custom field values'),
     },
-    async ({ company_id, fields }) => {
+    async ({ company_id, fields, include_profile_values }) => {
       try {
         const { data } = await client.get(`/companies/${company_id}`, {
-          '_fields': fields || 'name,phone,website,standing,date_created,date_modified,postal_address',
+          '_fields': resolveAcceloFields(fields),
+        });
+        const company = await attachAcceloCustomFields(client, {
+          entity: 'companies',
+          objectId: company_id,
+          record: {
+            ...withAcceloAliases(data, {
+              status_id: 'status',
+            }),
+            status: data?.standing,
+          },
+          includeProfileValues: include_profile_values,
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify(data, null, 2),
+            text: JSON.stringify(company, null, 2),
           }],
         };
       } catch (err) {
@@ -98,33 +127,47 @@ function registerCompanyTools(server, client) {
       company_id: idParam.optional().describe('Filter contacts by company ID'),
       limit: z.number().int().min(1).max(100).optional().default(20).describe('Max results'),
       page: z.number().int().min(0).optional().default(0).describe('Page offset'),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ search, company_id, limit, page }) => {
+    async ({ search, company_id, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': 'firstname,surname,email,phone,company_id,standing',
+          '_fields': resolveAcceloFields(fields),
         };
         if (search) params['_search'] = search;
 
         const endpoint = company_id ? `/companies/${company_id}/contacts` : '/contacts';
-        const { data, meta } = await client.get(endpoint, params);
-        const contacts = Array.isArray(data) ? data : [data];
+        const result = await listAcceloCollection(client, {
+          path: endpoint,
+          params,
+          fetchAll: fetch_all,
+        });
+        const contacts = result.items;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               contacts: contacts.map(c => ({
-                id: c.id,
+                ...withAcceloAliases(c, {
+                  affiliation_id: 'default_affiliation',
+                  status_id: 'contact_status',
+                }),
                 name: `${c.firstname || ''} ${c.surname || ''}`.trim(),
-                email: c.email,
-                phone: c.phone,
-                company_id: c.company_id,
                 status: c.standing,
               })),
-              total: meta.more_info?.total_count || contacts.length,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -132,6 +175,47 @@ function registerCompanyTools(server, client) {
         return {
           isError: true,
           content: [{ type: 'text', text: `list_contacts failed: ${err.message}` }],
+        };
+      }
+    }
+  );
+  server.tool(
+    'get_contact',
+    'Get full details for a specific Accelo contact by ID, including profile values by default.',
+    {
+      contact_id: idParam.describe('The Accelo contact ID'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
+      include_profile_values: z.boolean().optional().default(true).describe('Include contact profile/custom field values'),
+    },
+    async ({ contact_id, fields, include_profile_values }) => {
+      try {
+        const { data } = await client.get(`/contacts/${contact_id}`, {
+          '_fields': resolveAcceloFields(fields),
+        });
+        const contact = await attachAcceloCustomFields(client, {
+          entity: 'contacts',
+          objectId: contact_id,
+          record: {
+            ...withAcceloAliases(data, {
+              affiliation_id: 'default_affiliation',
+              status_id: 'contact_status',
+            }),
+            name: `${data?.firstname || ''} ${data?.surname || ''}`.trim(),
+            status: data?.standing,
+          },
+          includeProfileValues: include_profile_values,
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(contact, null, 2),
+          }],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `get_contact failed: ${err.message}` }],
         };
       }
     }
@@ -158,13 +242,20 @@ function registerCompanyTools(server, client) {
         }
 
         const { data } = await client.post('/companies', body, {
-          '_fields': 'name,phone,website,standing,date_created,comments',
+          '_fields': '_ALL',
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ created_company: data }, null, 2),
+            text: JSON.stringify({
+              created_company: {
+                ...withAcceloAliases(data, {
+                  status_id: 'status',
+                }),
+                status: data?.standing,
+              },
+            }, null, 2),
           }],
         };
       } catch (err) {

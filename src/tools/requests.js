@@ -2,6 +2,12 @@
 
 const { z } = require('zod');
 const { AcceloClient } = require('../services/accelo-client');
+const { listAcceloCollection } = require('../services/accelo-pagination');
+const {
+  normalizeAcceloList,
+  resolveAcceloFields,
+  withAcceloAliases,
+} = require('../services/accelo-response');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 
@@ -16,13 +22,15 @@ function registerRequestTools(server, client) {
       status: z.enum(['open', 'pending', 'closed', 'all']).optional().default('open'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ search, affiliation_id, status, limit, page }) => {
+    async ({ search, affiliation_id, status, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': 'title,standing,type_id,affiliation_id,claimer_id,date_created,date_modified',
+          '_fields': resolveAcceloFields(fields),
         };
         if (search) params['_search'] = search;
 
@@ -32,23 +40,35 @@ function registerRequestTools(server, client) {
         const filterStr = AcceloClient.buildFilters(filters);
         if (filterStr) params['_filters'] = filterStr;
 
-        const { data, meta } = await client.get('/requests', params);
-        const requests = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/requests',
+          params,
+          fetchAll: fetch_all,
+        });
+        const requests = result.items;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               requests: requests.map(r => ({
-                id: r.id,
-                title: r.title,
+                ...withAcceloAliases(r, {
+                  affiliation_id: 'affiliation',
+                  type_id: 'type',
+                  claimer_id: 'claimer',
+                  priority_id: ['request_priority', 'priority'],
+                }),
                 status: r.standing,
-                affiliation_id: r.affiliation_id,
-                claimer_id: r.claimer_id,
-                date_created: r.date_created,
-                date_modified: r.date_modified,
               })),
-              total: meta.more_info?.total_count || requests.length,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -67,17 +87,26 @@ function registerRequestTools(server, client) {
     'Get full details for a specific Accelo request/ticket by ID.',
     {
       request_id: idParam.describe('The Accelo request ID'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ request_id }) => {
+    async ({ request_id, fields }) => {
       try {
         const { data } = await client.get(`/requests/${request_id}`, {
-          '_fields': 'title,standing,body,type_id,company_id,contact_id,date_created,date_modified,source,lead_id',
+          '_fields': resolveAcceloFields(fields),
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify(data, null, 2),
+            text: JSON.stringify({
+              ...withAcceloAliases(data, {
+                affiliation_id: 'affiliation',
+                type_id: 'type',
+                claimer_id: 'claimer',
+                priority_id: ['request_priority', 'priority'],
+              }),
+              status: data?.standing,
+            }, null, 2),
           }],
         };
       } catch (err) {

@@ -1,9 +1,16 @@
 'use strict';
 
 const { z } = require('zod');
+const { listAcceloCollection } = require('../services/accelo-pagination');
+const {
+  normalizeAcceloList,
+  resolveAcceloFields,
+  withAcceloAliases,
+} = require('../services/accelo-response');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 const ENTITY_TYPES = ['jobs', 'companies', 'contacts', 'contracts', 'issues', 'prospects', 'affiliations', 'milestones', 'invoices', 'staff', 'expenses', 'assets', 'contributors', 'purchases'];
+const EXTENSION_ENTITY_TYPES = ['jobs', 'issues', 'contracts', 'prospects', 'assets'];
 
 function buildFilters(opts) {
   const parts = [];
@@ -114,10 +121,13 @@ function registerLookupTools(server, client) {
       against_type: z.string().optional().describe('Filter to tags on this object type (e.g. "job")'),
       against_id: idParam.optional().describe('Filter to tags on this specific object (requires against_type)'),
       limit: z.number().int().min(1).max(100).optional().default(50),
+      page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
     },
-    async ({ search, against_type, against_id, limit }) => {
+    async ({ search, against_type, against_id, limit, page, fetch_all }) => {
       const params = {
         '_limit': limit,
+        '_page': page,
         '_fields': 'name',
       };
       if (search) params['_search'] = search;
@@ -126,8 +136,12 @@ function registerLookupTools(server, client) {
         if (filters) params['_filters'] = filters;
       }
 
-      const { data } = await client.get('/tags', params);
-      const tags = Array.isArray(data) ? data : (data ? [data] : []);
+      const result = await listAcceloCollection(client, {
+        path: '/tags',
+        params,
+        fetchAll: fetch_all,
+      });
+      const tags = result.items;
 
       return {
         content: [{
@@ -137,6 +151,15 @@ function registerLookupTools(server, client) {
               id: t.id,
               name: t.name,
             })),
+            total: result.total,
+            returned: result.returned,
+            page: result.page,
+            page_size: result.page_size,
+            total_pages: result.total_pages,
+            has_more: result.has_more,
+            next_page: result.next_page,
+            fetch_all: result.fetch_all,
+            ...(result.count_warning ? { count_warning: result.count_warning } : {}),
           }, null, 2),
         }],
       };
@@ -149,10 +172,14 @@ function registerLookupTools(server, client) {
     {
       staff_id: idParam.optional().describe('Filter to groups this staff member belongs to'),
       search: z.string().optional().describe('Search by group title'),
+      limit: z.number().int().min(1).max(100).optional().default(100),
+      page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
     },
-    async ({ staff_id, search }) => {
+    async ({ staff_id, search, limit, page, fetch_all }) => {
       const params = {
-        '_limit': 100,
+        '_limit': limit,
+        '_page': page,
         '_fields': 'title,standing,parent_id',
       };
       if (search) params['_search'] = search;
@@ -161,8 +188,12 @@ function registerLookupTools(server, client) {
         if (filters) params['_filters'] = filters;
       }
 
-      const { data } = await client.get('/groups', params);
-      const groups = Array.isArray(data) ? data : (data ? [data] : []);
+      const result = await listAcceloCollection(client, {
+        path: '/groups',
+        params,
+        fetchAll: fetch_all,
+      });
+      const groups = result.items;
 
       return {
         content: [{
@@ -174,6 +205,15 @@ function registerLookupTools(server, client) {
               standing: g.standing,
               parent_id: g.parent_id,
             })),
+            total: result.total,
+            returned: result.returned,
+            page: result.page,
+            page_size: result.page_size,
+            total_pages: result.total_pages,
+            has_more: result.has_more,
+            next_page: result.next_page,
+            fetch_all: result.fetch_all,
+            ...(result.count_warning ? { count_warning: result.count_warning } : {}),
           }, null, 2),
         }],
       };
@@ -188,12 +228,14 @@ function registerLookupTools(server, client) {
       against_id: idParam.optional().describe('ID of the object'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ against_type, against_id, limit, page }) => {
+    async ({ against_type, against_id, limit, page, fetch_all, fields }) => {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'title,against_type,against_id,quantity,unit_cost,total,billable,tax,date_incurred,type,standing',
+        '_fields': resolveAcceloFields(fields),
       };
       const filters = buildFilters({
         ...(against_type ? { against_type } : {}),
@@ -201,28 +243,31 @@ function registerLookupTools(server, client) {
       });
       if (filters) params['_filters'] = filters;
 
-      const { data, meta } = await client.get('/expenses', params);
-      const expenses = Array.isArray(data) ? data : (data ? [data] : []);
+      const result = await listAcceloCollection(client, {
+        path: '/expenses',
+        params,
+        fetchAll: fetch_all,
+      });
+      const expenses = result.items;
 
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             expenses: expenses.map(e => ({
-              id: e.id,
-              title: e.title,
-              against_type: e.against_type,
-              against_id: e.against_id,
-              quantity: e.quantity,
-              unit_cost: e.unit_cost,
-              total: e.total,
-              billable: e.billable,
-              tax: e.tax,
-              date_incurred: e.date_incurred,
-              type: typeof e.type === 'object' ? e.type?.title : e.type,
-              standing: e.standing,
+              ...withAcceloAliases(e, {
+                type_id: ['expense_type', 'type'],
+              }),
             })),
-            total: meta.more_info?.total_count || expenses.length,
+            total: result.total,
+            returned: result.returned,
+            page: result.page,
+            page_size: result.page_size,
+            total_pages: result.total_pages,
+            has_more: result.has_more,
+            next_page: result.next_page,
+            fetch_all: result.fetch_all,
+            ...(result.count_warning ? { count_warning: result.count_warning } : {}),
           }, null, 2),
         }],
       };
@@ -234,12 +279,15 @@ function registerLookupTools(server, client) {
     'List custom/profile fields available for a given entity type. Returns field names, types, and options.',
     {
       entity: z.enum(ENTITY_TYPES).describe('The entity type to list profile fields for'),
+      limit: z.number().int().min(1).max(1000).optional().default(250),
+      page: z.number().int().min(0).optional().default(0),
     },
-    async ({ entity }) => {
+    async ({ entity, limit, page }) => {
       const { data } = await client.get(`/${entity}/profiles/fields`, {
-        '_limit': 100,
+        '_limit': limit,
+        '_page': page,
       });
-      const fields = Array.isArray(data) ? data : (data ? [data] : []);
+      const fields = normalizeAcceloList(data);
 
       return {
         content: [{
@@ -266,14 +314,19 @@ function registerLookupTools(server, client) {
     {
       entity: z.enum(ENTITY_TYPES).describe('The entity type'),
       object_id: idParam.optional().describe('Specific object ID to get profile values for (omit for all)'),
+      limit: z.number().int().min(1).max(1000).optional().default(250),
+      page: z.number().int().min(0).optional().default(0),
     },
-    async ({ entity, object_id }) => {
+    async ({ entity, object_id, limit, page }) => {
       const path = object_id
         ? `/${entity}/${object_id}/profiles/values`
         : `/${entity}/profiles/values`;
 
-      const { data } = await client.get(path, { '_limit': 100 });
-      const values = Array.isArray(data) ? data : (data ? [data] : []);
+      const { data } = await client.get(path, {
+        '_limit': limit,
+        '_page': page,
+      });
+      const values = normalizeAcceloList(data);
 
       return {
         content: [{
@@ -291,6 +344,64 @@ function registerLookupTools(server, client) {
               link_type: v.link_type,
               link_id: v.link_id,
             })),
+          }, null, 2),
+        }],
+      };
+    }
+  );
+  server.tool(
+    'list_extension_fields',
+    'List extension/custom fields for entities whose field sets vary by type, such as jobs, issues, contracts, and prospects.',
+    {
+      entity: z.enum(EXTENSION_ENTITY_TYPES).describe('The entity type to list extension fields for'),
+      limit: z.number().int().min(1).max(1000).optional().default(250),
+      page: z.number().int().min(0).optional().default(0),
+    },
+    async ({ entity, limit, page }) => {
+      const { data } = await client.get(`/${entity}/extensions/fields`, {
+        '_limit': limit,
+        '_page': page,
+      });
+      const fields = normalizeAcceloList(data);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            entity,
+            extension_fields: fields,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+  server.tool(
+    'list_extension_values',
+    'List extension/custom field values. Can get values for a specific object or all values across an entity type.',
+    {
+      entity: z.enum(EXTENSION_ENTITY_TYPES).describe('The entity type'),
+      object_id: idParam.optional().describe('Specific object ID to get extension values for (omit for all)'),
+      limit: z.number().int().min(1).max(1000).optional().default(250),
+      page: z.number().int().min(0).optional().default(0),
+    },
+    async ({ entity, object_id, limit, page }) => {
+      const path = object_id
+        ? `/${entity}/${object_id}/extensions/values`
+        : `/${entity}/extensions/values`;
+
+      const { data } = await client.get(path, {
+        '_limit': limit,
+        '_page': page,
+      });
+      const values = normalizeAcceloList(data);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            entity,
+            ...(object_id ? { object_id } : {}),
+            extension_values: values,
           }, null, 2),
         }],
       };

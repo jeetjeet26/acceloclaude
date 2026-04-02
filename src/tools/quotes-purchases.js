@@ -1,6 +1,12 @@
 'use strict';
 
 const { z } = require('zod');
+const { listAcceloCollection } = require('../services/accelo-pagination');
+const {
+  normalizeAcceloList,
+  resolveAcceloFields,
+  withAcceloAliases,
+} = require('../services/accelo-response');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 
@@ -24,12 +30,14 @@ function registerQuoteTools(server, client) {
       search: z.string().optional().describe('Search by quote title'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ against_type, against_id, standing, manager_id, search, limit, page }) => {
+    async ({ against_type, against_id, standing, manager_id, search, limit, page, fetch_all, fields }) => {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'title,standing,against_type,against_id,affiliation_id,manager_id,created_by_staff_id,date_created,date_expiry,service_price_total,service_time_total,material_price_total,total_price',
+        '_fields': resolveAcceloFields(fields),
       };
       if (search) params['_search'] = search;
       const filters = buildFilters({
@@ -40,30 +48,33 @@ function registerQuoteTools(server, client) {
       });
       if (filters) params['_filters'] = filters;
 
-      const { data, meta } = await client.get('/quotes', params);
-      const quotes = Array.isArray(data) ? data : (data ? [data] : []);
+      const result = await listAcceloCollection(client, {
+        path: '/quotes',
+        params,
+        fetchAll: fetch_all,
+      });
+      const quotes = result.items;
 
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             quotes: quotes.map(q => ({
-              id: q.id,
-              title: q.title,
-              standing: q.standing,
-              against_type: q.against_type,
-              against_id: q.against_id,
-              affiliation_id: q.affiliation_id,
-              manager_id: q.manager_id,
-              created_by: q.created_by_staff_id,
-              date_created: q.date_created,
-              date_expiry: q.date_expiry,
-              service_price: q.service_price_total,
+              ...withAcceloAliases(q, {
+                affiliation_id: 'affiliation',
+                manager_id: 'manager',
+              }),
               service_hours: q.service_time_total ? (Number(q.service_time_total) / 3600).toFixed(2) : null,
-              material_price: q.material_price_total,
-              total_price: q.total_price,
             })),
-            total: meta.more_info?.total_count || quotes.length,
+            total: result.total,
+            returned: result.returned,
+            page: result.page,
+            page_size: result.page_size,
+            total_pages: result.total_pages,
+            has_more: result.has_more,
+            next_page: result.next_page,
+            fetch_all: result.fetch_all,
+            ...(result.count_warning ? { count_warning: result.count_warning } : {}),
           }, null, 2),
         }],
       };
@@ -75,16 +86,20 @@ function registerQuoteTools(server, client) {
     'Get full details for a specific Accelo quote/proposal by ID, including introduction, conclusion, and terms.',
     {
       quote_id: idParam.describe('The Accelo quote ID'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ quote_id }) => {
+    async ({ quote_id, fields }) => {
       const { data } = await client.get(`/quotes/${quote_id}`, {
-        '_fields': 'title,standing,against_type,against_id,affiliation_id,manager_id,created_by_staff_id,date_created,date_expiry,service_price_total,service_time_total,material_price_total,total_price,introduction,conclusion,terms,notes,portal_access',
+        '_fields': resolveAcceloFields(fields),
       });
 
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: JSON.stringify(withAcceloAliases(data, {
+            affiliation_id: 'affiliation',
+            manager_id: 'manager',
+          }), null, 2),
         }],
       };
     }
@@ -101,12 +116,14 @@ function registerPurchaseTools(server, client) {
       search: z.string().optional().describe('Search by purchase title'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ owner_id, affiliation_id, search, limit, page }) => {
+    async ({ owner_id, affiliation_id, search, limit, page, fetch_all, fields }) => {
       const params = {
         '_limit': limit,
         '_page': page,
-        '_fields': 'title,owner_id,creator_id,affiliation_id,amount,tax,total,date_purchased',
+        '_fields': resolveAcceloFields(fields),
       };
       if (search) params['_search'] = search;
       const filters = buildFilters({
@@ -115,25 +132,32 @@ function registerPurchaseTools(server, client) {
       });
       if (filters) params['_filters'] = filters;
 
-      const { data, meta } = await client.get('/purchases', params);
-      const purchases = Array.isArray(data) ? data : (data ? [data] : []);
+      const result = await listAcceloCollection(client, {
+        path: '/purchases',
+        params,
+        fetchAll: fetch_all,
+      });
+      const purchases = result.items;
 
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             purchases: purchases.map(p => ({
-              id: p.id,
-              title: p.title,
-              owner_id: p.owner_id,
-              creator_id: p.creator_id,
-              affiliation_id: p.affiliation_id,
-              amount: p.amount,
-              tax: p.tax,
-              total: p.total,
-              date_purchased: p.date_purchased,
+              ...withAcceloAliases(p, {
+                owner_id: 'owner',
+                affiliation_id: 'affiliation',
+              }),
             })),
-            total: meta.more_info?.total_count || purchases.length,
+            total: result.total,
+            returned: result.returned,
+            page: result.page,
+            page_size: result.page_size,
+            total_pages: result.total_pages,
+            has_more: result.has_more,
+            next_page: result.next_page,
+            fetch_all: result.fetch_all,
+            ...(result.count_warning ? { count_warning: result.count_warning } : {}),
           }, null, 2),
         }],
       };

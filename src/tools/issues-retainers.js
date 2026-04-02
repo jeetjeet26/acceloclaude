@@ -2,6 +2,13 @@
 
 const { z } = require('zod');
 const { AcceloClient } = require('../services/accelo-client');
+const { listAcceloCollection } = require('../services/accelo-pagination');
+const {
+  attachAcceloCustomFields,
+  normalizeAcceloList,
+  resolveAcceloFields,
+  withAcceloAliases,
+} = require('../services/accelo-response');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 
@@ -16,13 +23,15 @@ function registerIssueTools(server, client) {
       assignee_id: idParam.optional().describe('Filter by assigned staff ID'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ search, company_id, status, assignee_id, limit, page }) => {
+    async ({ search, company_id, status, assignee_id, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': 'title,standing,company_id,contact_id,assignee,date_created,date_modified,date_due,type_id,priority',
+          '_fields': resolveAcceloFields(fields),
         };
         if (search) params['_search'] = search;
 
@@ -33,24 +42,39 @@ function registerIssueTools(server, client) {
         const filterStr = AcceloClient.buildFilters(filters);
         if (filterStr) params['_filters'] = filterStr;
 
-        const { data, meta } = await client.get('/issues', params);
-        const issues = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/issues',
+          params,
+          fetchAll: fetch_all,
+        });
+        const issues = result.items;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               tickets: issues.map(i => ({
-                id: i.id,
-                title: i.title,
+                ...withAcceloAliases(i, {
+                  company_id: 'company',
+                  contact_id: 'contact',
+                  affiliation_id: 'affiliation',
+                  assignee_id: 'assignee',
+                  type_id: ['issue_type', 'type'],
+                  priority_id: ['issue_priority', 'priority'],
+                  class_id: 'class',
+                  status_id: 'status',
+                }),
                 status: i.standing,
-                company_id: i.company_id,
-                assignee: i.assignee,
-                priority: i.priority,
-                date_created: i.date_created,
-                date_due: i.date_due,
               })),
-              total: meta.more_info?.total_count || issues.length,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -90,13 +114,27 @@ function registerIssueTools(server, client) {
         }
 
         const { data } = await client.post('/issues', body, {
-          '_fields': 'title,standing,company_id,contact_id,assignee,date_created,date_due,type_id,priority,class_id,description',
+          '_fields': '_ALL',
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ created_issue: data }, null, 2),
+            text: JSON.stringify({
+              created_issue: {
+                ...withAcceloAliases(data, {
+                  company_id: 'company',
+                  contact_id: 'contact',
+                  affiliation_id: 'affiliation',
+                  assignee_id: 'assignee',
+                  type_id: ['issue_type', 'type'],
+                  priority_id: ['issue_priority', 'priority'],
+                  class_id: 'class',
+                  status_id: 'status',
+                }),
+                status: data?.standing,
+              },
+            }, null, 2),
           }],
         };
       } catch (err) {
@@ -110,20 +148,42 @@ function registerIssueTools(server, client) {
 
   server.tool(
     'get_issue',
-    'Get full details for a specific Accelo ticket/issue by ID.',
+    'Get full details for a specific Accelo ticket/issue by ID, including profile and extension values by default.',
     {
       issue_id: idParam.describe('The Accelo issue/ticket ID'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
+      include_profile_values: z.boolean().optional().default(true).describe('Include issue profile/custom field values'),
+      include_extension_values: z.boolean().optional().default(true).describe('Include issue extension field values'),
     },
-    async ({ issue_id }) => {
+    async ({ issue_id, fields, include_profile_values, include_extension_values }) => {
       try {
         const { data } = await client.get(`/issues/${issue_id}`, {
-          '_fields': 'title,standing,body,company_id,contact_id,assignee,date_created,date_modified,date_due,resolution,type_id,priority,class_id',
+          '_fields': resolveAcceloFields(fields),
+        });
+        const issue = await attachAcceloCustomFields(client, {
+          entity: 'issues',
+          objectId: issue_id,
+          record: {
+            ...withAcceloAliases(data, {
+              company_id: 'company',
+              contact_id: 'contact',
+              affiliation_id: 'affiliation',
+              assignee_id: 'assignee',
+              type_id: ['issue_type', 'type'],
+              priority_id: ['issue_priority', 'priority'],
+              class_id: 'class',
+              status_id: 'status',
+            }),
+            status: data?.standing,
+          },
+          includeProfileValues: include_profile_values,
+          includeExtensionValues: include_extension_values,
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify(data, null, 2),
+            text: JSON.stringify(issue, null, 2),
           }],
         };
       } catch (err) {
@@ -145,13 +205,15 @@ function registerRetainerTools(server, client) {
       status: z.enum(['active', 'inactive', 'complete', 'cancelled', 'all']).optional().default('active'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ company_id, status, limit, page }) => {
+    async ({ company_id, status, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_expires,budget,rate_charged,value,period_template_id,auto_renew,type_id',
+          '_fields': resolveAcceloFields(fields),
         };
 
         const filters = [];
@@ -160,28 +222,36 @@ function registerRetainerTools(server, client) {
         const filterStr = AcceloClient.buildFilters(filters);
         if (filterStr) params['_filters'] = filterStr;
 
-        const { data, meta } = await client.get('/contracts', params);
-        const retainers = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/contracts',
+          params,
+          fetchAll: fetch_all,
+        });
+        const retainers = result.items;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               retainers: retainers.map(r => ({
-                id: r.id,
-                title: r.title,
+                ...withAcceloAliases(r, {
+                  company_id: 'company',
+                  manager_id: 'manager',
+                  affiliation_id: 'affiliation',
+                  status_id: 'status',
+                  type_id: ['contract_type', 'type'],
+                }),
                 status: r.standing,
-                company_id: r.company_id,
-                manager_id: r.manager_id,
-                date_commenced: r.date_commenced,
-                date_expires: r.date_expires,
-                budget: r.budget,
-                rate_charged: r.rate_charged,
-                value: r.value,
-                period_template_id: r.period_template_id,
-                auto_renew: r.auto_renew,
               })),
-              total: meta.more_info?.total_count || retainers.length,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -196,20 +266,39 @@ function registerRetainerTools(server, client) {
 
   server.tool(
     'get_retainer',
-    'Get full details for a specific Accelo retainer/contract by ID.',
+    'Get full details for a specific Accelo retainer/contract by ID, including profile and extension values by default.',
     {
       retainer_id: idParam.describe('The Accelo contract/retainer ID'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
+      include_profile_values: z.boolean().optional().default(true).describe('Include retainer profile/custom field values'),
+      include_extension_values: z.boolean().optional().default(true).describe('Include retainer extension field values'),
     },
-    async ({ retainer_id }) => {
+    async ({ retainer_id, fields, include_profile_values, include_extension_values }) => {
       try {
         const { data } = await client.get(`/contracts/${retainer_id}`, {
-          '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_expires,budget,rate_charged,value,period_template_id,auto_renew,type_id',
+          '_fields': resolveAcceloFields(fields),
+        });
+        const retainer = await attachAcceloCustomFields(client, {
+          entity: 'contracts',
+          objectId: retainer_id,
+          record: {
+            ...withAcceloAliases(data, {
+              company_id: 'company',
+              manager_id: 'manager',
+              affiliation_id: 'affiliation',
+              status_id: 'status',
+              type_id: ['contract_type', 'type'],
+            }),
+            status: data?.standing,
+          },
+          includeProfileValues: include_profile_values,
+          includeExtensionValues: include_extension_values,
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify(data, null, 2),
+            text: JSON.stringify(retainer, null, 2),
           }],
         };
       } catch (err) {

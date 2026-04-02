@@ -2,6 +2,14 @@
 
 Accelo connector for Claude with read and limited write support. It exposes tools covering companies, contacts, projects, tickets, retainers, activities, time entries, prospects, staff, and invoices.
 
+Read tools now request Accelo's `_ALL` standard fields by default instead of hand-picked summaries, and single-record detail tools also surface profile/extension values where Accelo exposes them.
+
+List tools now return authoritative pagination metadata where Accelo exposes `/count` endpoints:
+- `total`: total matching records across all pages
+- `returned`: records included in this response
+- `has_more` / `next_page`: whether another page exists
+- `fetch_all`: when true, the connector walks all pages and returns the full result set
+
 ## Setup
 
 ### 1. Install dependencies
@@ -80,6 +88,7 @@ pm2 start src/index.js --name accelo-mcp
 | `list_companies` | List/search client companies |
 | `get_company` | Full company details by ID |
 | `list_contacts` | List/search contacts, filter by company |
+| `get_contact` | Full contact details by ID |
 | `list_projects` | List projects, filter by status/company |
 | `get_project` | Full project details |
 | `create_job` | Create a new job/project |
@@ -97,7 +106,12 @@ pm2 start src/index.js --name accelo-mcp
 | `list_activities` | Activities (emails, calls, notes) |
 | `list_time_entries` | Time entries by staff/project/date |
 | `list_prospects` | Sales prospects/opportunities |
+| `get_prospect` | Full prospect details by ID |
 | `list_staff` | Staff members |
 | `list_invoices` | Invoices by company/status |
+| `list_profile_fields` | List custom/profile field definitions |
+| `list_profile_values` | List custom/profile field values |
+| `list_extension_fields` | List extension field definitions |
+| `list_extension_values` | List extension field values |
 
 Write support currently includes creating companies, jobs, issues, and tasks, plus updating jobs and tasks. Delete operations are not exposed.

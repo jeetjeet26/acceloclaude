@@ -1,6 +1,12 @@
 'use strict';
 
 const { z } = require('zod');
+const { listAcceloCollection } = require('../services/accelo-pagination');
+const {
+  normalizeAcceloList,
+  resolveAcceloFields,
+  withAcceloAliases,
+} = require('../services/accelo-response');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 
@@ -36,13 +42,15 @@ function registerActivityTools(server, client) {
       date_before: z.string().optional().describe('Filter activities before this date (YYYY-MM-DD)'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ against_type, against_id, activity_type, date_after, date_before, limit, page }) => {
+    async ({ against_type, against_id, activity_type, date_after, date_before, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': 'subject,body,date_created,date_modified,date_logged,owner_id,against_type,against_id,medium,thread_id,billable,nonbillable,staff,rate_charged',
+          '_fields': resolveAcceloFields(fields),
         };
         const filters = buildAcceloFilters({
           against_type,
@@ -53,29 +61,39 @@ function registerActivityTools(server, client) {
         });
         if (filters) params['_filters'] = filters;
 
-        const { data, meta } = await client.get('/activities', params);
-        const activities = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/activities',
+          params,
+          fetchAll: fetch_all,
+        });
+        const activities = result.items;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               activities: activities.map(a => ({
-                id: a.id,
-                subject: a.subject,
+                ...withAcceloAliases(a, {
+                  owner_id: 'owner',
+                  staff_id: 'staff',
+                  thread_id: 'thread',
+                  class_id: 'activity_class',
+                  priority_id: ['activity_priority', 'priority'],
+                }),
                 type: a.medium,
-                against_type: a.against_type,
-                against_id: a.against_id,
-                owner_id: a.owner_id,
-                staff_id: typeof a.staff === 'object' ? a.staff?.id : a.staff,
-                date_created: a.date_created,
-                date_logged: a.date_logged,
                 billable_hours: Number(a.billable) ? (Number(a.billable) / 3600).toFixed(2) : null,
                 nonbillable_hours: Number(a.nonbillable) ? (Number(a.nonbillable) / 3600).toFixed(2) : null,
-                rate_charged: a.rate_charged,
                 body_preview: a.body ? a.body.substring(0, 200) + (a.body.length > 200 ? '...' : '') : null,
               })),
-              total: meta.more_info?.total_count || activities.length,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -100,13 +118,15 @@ function registerActivityTools(server, client) {
       date_before: z.string().optional().describe('Only entries logged before this date (YYYY-MM-DD)'),
       limit: z.number().int().min(1).max(100).optional().default(50),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ staff_id, against_type, against_id, date_after, date_before, limit, page }) => {
+    async ({ staff_id, against_type, against_id, date_after, date_before, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': 'subject,medium,date_logged,billable,nonbillable,rate_charged,against_type,against_id,staff,task,standing',
+          '_fields': resolveAcceloFields(fields),
         };
         const filters = buildAcceloFilters({
           against_type,
@@ -118,29 +138,30 @@ function registerActivityTools(server, client) {
         });
         if (filters) params['_filters'] = filters;
 
-        const { data, meta } = await client.get('/activities', params);
-        const activities = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/activities',
+          params,
+          fetchAll: fetch_all,
+        });
+        const activities = result.items;
 
         const withTime = activities.filter(a => Number(a.billable) > 0 || Number(a.nonbillable) > 0);
+        const isComplete = result.fetch_all || !result.has_more;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               time_entries: withTime.map(a => ({
-                id: a.id,
-                subject: a.subject,
-                medium: a.medium,
-                date_logged: a.date_logged,
+                ...withAcceloAliases(a, {
+                  owner_id: 'owner',
+                  staff_id: 'staff',
+                  task_id: 'task',
+                  thread_id: 'thread',
+                }),
                 billable_hours: (Number(a.billable) / 3600).toFixed(2),
                 nonbillable_hours: (Number(a.nonbillable) / 3600).toFixed(2),
                 total_hours: ((Number(a.billable) + Number(a.nonbillable)) / 3600).toFixed(2),
-                rate_charged: a.rate_charged,
-                against_type: a.against_type,
-                against_id: a.against_id,
-                staff_id: typeof a.staff === 'object' ? a.staff?.id : a.staff,
-                task_id: typeof a.task === 'object' ? a.task?.id : a.task,
-                standing: a.standing,
               })),
               summary: {
                 activities_with_time: withTime.length,
@@ -148,7 +169,17 @@ function registerActivityTools(server, client) {
                 total_billable_hours: (withTime.reduce((s, a) => s + Number(a.billable), 0) / 3600).toFixed(2),
                 total_nonbillable_hours: (withTime.reduce((s, a) => s + Number(a.nonbillable), 0) / 3600).toFixed(2),
               },
-              total: meta.more_info?.total_count || activities.length,
+              total: isComplete ? withTime.length : null,
+              returned: withTime.length,
+              activity_total_from_api: result.total,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              total_is_complete: isComplete,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -174,7 +205,11 @@ function registerActivityTools(server, client) {
     },
     async ({ staff_id, against_type, against_id, date_after, date_before }) => {
       try {
-        const params = {};
+        const params = {
+          '_limit': 100,
+          '_page': 0,
+          '_fields': 'billable,nonbillable,rate_charged',
+        };
         const filters = buildAcceloFilters({
           against_type,
           against_id,
@@ -184,16 +219,30 @@ function registerActivityTools(server, client) {
         });
         if (filters) params['_filters'] = filters;
 
-        const { data } = await client.get('/activities/allocations', params);
+        const result = await listAcceloCollection(client, {
+          path: '/activities',
+          params,
+          fetchAll: true,
+        });
+        const activities = result.items;
+        const billableSeconds = activities.reduce((sum, activity) => sum + Number(activity.billable || 0), 0);
+        const nonbillableSeconds = activities.reduce((sum, activity) => sum + Number(activity.nonbillable || 0), 0);
+        const totalCharged = activities.reduce(
+          (sum, activity) => sum + ((Number(activity.billable || 0) / 3600) * Number(activity.rate_charged || 0)),
+          0
+        );
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
-              billable_hours: (Number(data.billable || 0) / 3600).toFixed(2),
-              nonbillable_hours: (Number(data.unbillable || data.nonbillable || 0) / 3600).toFixed(2),
-              total_hours: ((Number(data.billable || 0) + Number(data.unbillable || data.nonbillable || 0)) / 3600).toFixed(2),
-              total_charged: data.charged || '0.00',
+              billable_hours: (billableSeconds / 3600).toFixed(2),
+              nonbillable_hours: (nonbillableSeconds / 3600).toFixed(2),
+              total_hours: ((billableSeconds + nonbillableSeconds) / 3600).toFixed(2),
+              total_charged: totalCharged.toFixed(2),
+              activities_scanned: activities.length,
+              total_matching_activities: result.total,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };

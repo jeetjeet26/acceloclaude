@@ -2,6 +2,13 @@
 
 const { z } = require('zod');
 const { AcceloClient } = require('../services/accelo-client');
+const { listAcceloCollection } = require('../services/accelo-pagination');
+const {
+  attachAcceloCustomFields,
+  normalizeAcceloList,
+  resolveAcceloFields,
+  withAcceloAliases,
+} = require('../services/accelo-response');
 
 const idParam = z.union([z.string(), z.number()]).transform(String);
 
@@ -24,7 +31,7 @@ async function updateJob(client, jobId, updates) {
   }
 
   const { data } = await client.put(`/jobs/${jobId}`, body, {
-    '_fields': 'title,standing,company_id,manager_id,description,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,job_type',
+    '_fields': '_ALL',
   });
 
   return data;
@@ -41,13 +48,15 @@ function registerProjectTools(server, client) {
       status: z.enum(['active', 'inactive', 'complete', 'cancelled', 'all']).optional().default('active'),
       limit: z.number().int().min(1).max(100).optional().default(20),
       page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ search, company_id, status, limit, page }) => {
+    async ({ search, company_id, status, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
           '_page': page,
-          '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,staff',
+          '_fields': resolveAcceloFields(fields),
         };
         if (search) params['_search'] = search;
 
@@ -57,29 +66,37 @@ function registerProjectTools(server, client) {
         const filterStr = AcceloClient.buildFilters(filters);
         if (filterStr) params['_filters'] = filterStr;
 
-        const { data, meta } = await client.get('/jobs', params);
-        const projects = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/jobs',
+          params,
+          fetchAll: fetch_all,
+        });
+        const projects = result.items;
 
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               projects: projects.map(p => ({
-                id: p.id,
-                title: p.title,
+                ...withAcceloAliases(p, {
+                  company_id: 'company',
+                  manager_id: 'manager',
+                  affiliation_id: 'affiliation',
+                  status_id: 'status',
+                  type_id: ['job_type', 'type'],
+                  rate_id: 'rate',
+                }),
                 status: p.standing,
-                company_id: p.company_id,
-                manager_id: p.manager_id,
-                date_created: p.date_created,
-                date_commenced: p.date_commenced,
-                date_due: p.date_due,
-                date_completed: p.date_completed,
-                budget: p.budget,
-                rate_charged: p.rate_charged,
-                billable: p.billable,
-                value: p.value,
               })),
-              total: meta.more_info?.total_count || projects.length,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -95,20 +112,40 @@ function registerProjectTools(server, client) {
   // Get single project
   server.tool(
     'get_project',
-    'Get full details for a specific Accelo project/job by ID, including milestones and tasks.',
+    'Get full details for a specific Accelo project/job by ID, including profile and extension values by default.',
     {
       project_id: idParam.describe('The Accelo project ID'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
+      include_profile_values: z.boolean().optional().default(true).describe('Include project profile/custom field values'),
+      include_extension_values: z.boolean().optional().default(true).describe('Include project extension field values'),
     },
-    async ({ project_id }) => {
+    async ({ project_id, fields, include_profile_values, include_extension_values }) => {
       try {
         const { data } = await client.get(`/jobs/${project_id}`, {
-          '_fields': 'title,standing,company_id,manager_id,description,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value',
+          '_fields': resolveAcceloFields(fields),
+        });
+        const project = await attachAcceloCustomFields(client, {
+          entity: 'jobs',
+          objectId: project_id,
+          record: {
+            ...withAcceloAliases(data, {
+              company_id: 'company',
+              manager_id: 'manager',
+              affiliation_id: 'affiliation',
+              status_id: 'status',
+              type_id: ['job_type', 'type'],
+              rate_id: 'rate',
+            }),
+            status: data?.standing,
+          },
+          includeProfileValues: include_profile_values,
+          includeExtensionValues: include_extension_values,
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify(data, null, 2),
+            text: JSON.stringify(project, null, 2),
           }],
         };
       } catch (err) {
@@ -128,20 +165,31 @@ function registerProjectTools(server, client) {
       project_id: idParam.describe('The Accelo project/job ID'),
       status: z.enum(['active', 'inactive', 'complete', 'cancelled', 'all']).optional().default('all'),
       limit: z.number().int().min(1).max(100).optional().default(50),
+      page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ project_id, status, limit }) => {
+    async ({ project_id, status, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
-          '_fields': 'title,standing,date_created,date_started,date_commenced,date_due,date_completed,manager,budget,logged,charged,ordering,status',
+          '_page': page,
+          '_fields': resolveAcceloFields(fields),
         };
 
+        const filters = [`job(${project_id})`];
         if (status && status !== 'all') {
-          params['_filters'] = `standing(${status})`;
+          filters.push(`standing(${status})`);
         }
+        const filterStr = AcceloClient.buildFilters(filters);
+        if (filterStr) params['_filters'] = filterStr;
 
-        const { data, meta } = await client.get(`/jobs/${project_id}/milestones`, params);
-        const milestones = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/milestones',
+          params,
+          fetchAll: fetch_all,
+        });
+        const milestones = result.items;
 
         return {
           content: [{
@@ -149,21 +197,21 @@ function registerProjectTools(server, client) {
             text: JSON.stringify({
               project_id,
               milestones: milestones.map(m => ({
-                id: m.id,
-                title: m.title,
+                ...withAcceloAliases(m, {
+                  manager_id: 'manager',
+                  status_id: 'status',
+                }),
                 status: m.standing,
-                date_created: m.date_created,
-                date_started: m.date_started,
-                date_commenced: m.date_commenced,
-                date_due: m.date_due,
-                date_completed: m.date_completed,
-                manager_id: typeof m.manager === 'object' ? m.manager?.id : m.manager,
-                budget: m.budget,
-                logged: m.logged,
-                charged: m.charged,
-                ordering: m.ordering,
               })),
-              total: meta?.more_info?.total_count || milestones.length,
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
             }, null, 2),
           }],
         };
@@ -183,22 +231,53 @@ function registerProjectTools(server, client) {
     {
       project_id: idParam.describe('The Accelo project/job ID'),
       limit: z.number().int().min(1).max(100).optional().default(50),
+      page: z.number().int().min(0).optional().default(0),
+      fetch_all: z.boolean().optional().default(false).describe('Fetch all matching records across pages'),
+      fields: z.string().optional().describe('Fields to request from Accelo. Defaults to "_ALL".'),
     },
-    async ({ project_id, limit }) => {
+    async ({ project_id, limit, page, fetch_all, fields }) => {
       try {
         const params = {
           '_limit': limit,
-          '_fields': 'title,standing,date_created,date_started,date_due,date_completed,assignee,against_type,against_id,manager_id,description',
-          '_filters': `against_type(job),against_id(${project_id})`,
+          '_page': page,
+          '_fields': resolveAcceloFields(fields),
+          '_filters': `child_of_job(${project_id})`,
         };
 
-        const { data, meta } = await client.get('/tasks', params);
-        const tasks = Array.isArray(data) ? data : (data ? [data] : []);
+        const result = await listAcceloCollection(client, {
+          path: '/tasks',
+          params,
+          fetchAll: fetch_all,
+        });
+        const tasks = result.items;
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ project_id, tasks, total: meta?.more_info?.total_count || tasks.length }, null, 2),
+            text: JSON.stringify({
+              project_id,
+              tasks: tasks.map(task => ({
+                ...withAcceloAliases(task, {
+                  company_id: 'company',
+                  contact_id: 'contact',
+                  affiliation_id: 'affiliation',
+                  assignee_id: 'assignee',
+                  manager_id: 'manager',
+                  status_id: 'status',
+                  type_id: ['task_type', 'type'],
+                }),
+                status: task.standing,
+              })),
+              total: result.total,
+              returned: result.returned,
+              page: result.page,
+              page_size: result.page_size,
+              total_pages: result.total_pages,
+              has_more: result.has_more,
+              next_page: result.next_page,
+              fetch_all: result.fetch_all,
+              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
+            }, null, 2),
           }],
         };
       } catch (err) {
@@ -234,13 +313,26 @@ function registerProjectTools(server, client) {
         }
 
         const { data } = await client.put(`/tasks/${task_id}`, body, {
-          '_fields': 'title,standing,date_created,date_started,date_due,date_completed,assignee,against_type,against_id,manager_id,description',
+          '_fields': '_ALL',
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ updated_task: data }, null, 2),
+            text: JSON.stringify({
+              updated_task: {
+                ...withAcceloAliases(data, {
+                  company_id: 'company',
+                  contact_id: 'contact',
+                  affiliation_id: 'affiliation',
+                  assignee_id: 'assignee',
+                  manager_id: 'manager',
+                  status_id: 'status',
+                  type_id: ['task_type', 'type'],
+                }),
+                status: data?.standing,
+              },
+            }, null, 2),
           }],
         };
       } catch (err) {
@@ -274,13 +366,26 @@ function registerProjectTools(server, client) {
         const body = buildDefinedBody(params);
 
         const { data } = await client.post('/tasks', body, {
-          '_fields': 'title,standing,date_created,date_started,date_due,date_completed,assignee,against_type,against_id,manager_id,description',
+          '_fields': '_ALL',
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ created_task: data }, null, 2),
+            text: JSON.stringify({
+              created_task: {
+                ...withAcceloAliases(data, {
+                  company_id: 'company',
+                  contact_id: 'contact',
+                  affiliation_id: 'affiliation',
+                  assignee_id: 'assignee',
+                  manager_id: 'manager',
+                  status_id: 'status',
+                  type_id: ['task_type', 'type'],
+                }),
+                status: data?.standing,
+              },
+            }, null, 2),
           }],
         };
       } catch (err) {
@@ -318,7 +423,19 @@ function registerProjectTools(server, client) {
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ updated_job: data }, null, 2),
+            text: JSON.stringify({
+              updated_job: {
+                ...withAcceloAliases(data, {
+                  company_id: 'company',
+                  manager_id: 'manager',
+                  affiliation_id: 'affiliation',
+                  status_id: 'status',
+                  type_id: ['job_type', 'type'],
+                  rate_id: 'rate',
+                }),
+                status: data?.standing,
+              },
+            }, null, 2),
           }],
         };
       } catch (err) {
@@ -355,7 +472,19 @@ function registerProjectTools(server, client) {
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ updated_project: data }, null, 2),
+            text: JSON.stringify({
+              updated_project: {
+                ...withAcceloAliases(data, {
+                  company_id: 'company',
+                  manager_id: 'manager',
+                  affiliation_id: 'affiliation',
+                  status_id: 'status',
+                  type_id: ['job_type', 'type'],
+                  rate_id: 'rate',
+                }),
+                status: data?.standing,
+              },
+            }, null, 2),
           }],
         };
       } catch (err) {
@@ -391,13 +520,25 @@ function registerProjectTools(server, client) {
         const body = buildDefinedBody(params);
 
         const { data } = await client.post('/jobs', body, {
-          '_fields': 'title,standing,company_id,manager_id,date_created,date_commenced,date_due,date_completed,budget,rate_charged,billable,value,job_type',
+          '_fields': '_ALL',
         });
 
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({ created_job: data }, null, 2),
+            text: JSON.stringify({
+              created_job: {
+                ...withAcceloAliases(data, {
+                  company_id: 'company',
+                  manager_id: 'manager',
+                  affiliation_id: 'affiliation',
+                  status_id: 'status',
+                  type_id: ['job_type', 'type'],
+                  rate_id: 'rate',
+                }),
+                status: data?.standing,
+              },
+            }, null, 2),
           }],
         };
       } catch (err) {
