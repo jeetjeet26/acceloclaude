@@ -205,11 +205,6 @@ function registerActivityTools(server, client) {
     },
     async ({ staff_id, against_type, against_id, date_after, date_before }) => {
       try {
-        const params = {
-          '_limit': 100,
-          '_page': 0,
-          '_fields': 'billable,nonbillable,rate_charged',
-        };
         const filters = buildAcceloFilters({
           against_type,
           against_id,
@@ -217,20 +212,12 @@ function registerActivityTools(server, client) {
           date_logged_after: date_after ? Math.floor(new Date(date_after).getTime() / 1000) : undefined,
           date_logged_before: date_before ? Math.floor(new Date(date_before).getTime() / 1000) : undefined,
         });
-        if (filters) params['_filters'] = filters;
-
-        const result = await listAcceloCollection(client, {
-          path: '/activities',
-          params,
-          fetchAll: true,
-        });
-        const activities = result.items;
-        const billableSeconds = activities.reduce((sum, activity) => sum + Number(activity.billable || 0), 0);
-        const nonbillableSeconds = activities.reduce((sum, activity) => sum + Number(activity.nonbillable || 0), 0);
-        const totalCharged = activities.reduce(
-          (sum, activity) => sum + ((Number(activity.billable || 0) / 3600) * Number(activity.rate_charged || 0)),
-          0
-        );
+        const params = filters ? { '_filters': filters } : {};
+        const { data } = await client.get('/activities/allocations', params);
+        const allocations = Array.isArray(data) ? (data[0] || {}) : (data || {});
+        const billableSeconds = Number(allocations.billable || 0);
+        const nonbillableSeconds = Number(allocations.nonbillable ?? allocations.unbillable ?? 0);
+        const totalCharged = Number(allocations.charged || 0);
 
         return {
           content: [{
@@ -240,9 +227,8 @@ function registerActivityTools(server, client) {
               nonbillable_hours: (nonbillableSeconds / 3600).toFixed(2),
               total_hours: ((billableSeconds + nonbillableSeconds) / 3600).toFixed(2),
               total_charged: totalCharged.toFixed(2),
-              activities_scanned: activities.length,
-              total_matching_activities: result.total,
-              ...(result.count_warning ? { count_warning: result.count_warning } : {}),
+              activities_scanned: null,
+              total_matching_activities: null,
             }, null, 2),
           }],
         };

@@ -70,10 +70,12 @@ async function listAcceloCollection(
   let total = null;
   let countWarning = null;
 
-  try {
-    total = await getAcceloCount(client, path, params, countPath);
-  } catch (err) {
-    countWarning = err.message;
+  if (!fetchAll) {
+    try {
+      total = await getAcceloCount(client, path, params, countPath);
+    } catch (err) {
+      countWarning = err.message;
+    }
   }
 
   if (fetchAll) {
@@ -105,7 +107,7 @@ async function listAcceloCollection(
       }
     }
 
-    const resolvedTotal = total ?? items.length;
+    const resolvedTotal = items.length;
 
     return {
       items,
@@ -124,18 +126,17 @@ async function listAcceloCollection(
 
   const { data } = await client.get(path, params);
   const items = normalizeAcceloList(data);
-  const resolvedTotal = total ?? items.length;
   const hasMore = total !== null
     ? ((requestedPage + 1) * requestedLimit) < total
     : items.length === requestedLimit;
 
   return {
     items,
-    total: resolvedTotal,
+    total,
     returned: items.length,
     page: requestedPage,
     page_size: requestedLimit,
-    total_pages: requestedLimit ? Math.ceil(resolvedTotal / requestedLimit) : 1,
+    total_pages: total !== null && requestedLimit ? Math.ceil(total / requestedLimit) : null,
     pages_fetched: 1,
     has_more: hasMore,
     next_page: hasMore ? requestedPage + 1 : null,

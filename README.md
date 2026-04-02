@@ -10,6 +10,8 @@ List tools now return authoritative pagination metadata where Accelo exposes `/c
 - `has_more` / `next_page`: whether another page exists
 - `fetch_all`: when true, the connector walks all pages and returns the full result set
 
+If an Accelo `/count` endpoint is unavailable or fails, list tools now return `total: null` and `total_pages: null` instead of silently substituting the current page size.
+
 ## Setup
 
 ### 1. Install dependencies
